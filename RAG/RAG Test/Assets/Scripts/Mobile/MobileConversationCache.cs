@@ -108,46 +108,45 @@ public class MobileConversationCache : MonoBehaviour
         }
     }
     
-    private async Task LoadCacheData()
+    private Task LoadCacheData()
     {
-        await Task.Run(() =>
+        try
         {
-            try
+            // Load conversations on main thread
+            string conversationsJson = PlayerPrefs.GetString(CONVERSATIONS_KEY, "");
+            if (!string.IsNullOrEmpty(conversationsJson))
             {
-                // Load conversations
-                string conversationsJson = PlayerPrefs.GetString(CONVERSATIONS_KEY, "");
-                if (!string.IsNullOrEmpty(conversationsJson))
-                {
-                    conversationCache = JsonConvert.DeserializeObject<CachedConversationList>(conversationsJson);
-                }
-                
-                if (conversationCache == null)
-                {
-                    conversationCache = new CachedConversationList();
-                }
-                
-                // Load memories
-                string memoriesJson = PlayerPrefs.GetString(MEMORIES_KEY, "");
-                if (!string.IsNullOrEmpty(memoriesJson))
-                {
-                    memoryCache = JsonConvert.DeserializeObject<CachedMemoryList>(memoriesJson);
-                }
-                
-                if (memoryCache == null)
-                {
-                    memoryCache = new CachedMemoryList();
-                }
-                
-                totalCachedConversations = conversationCache.conversations.Count;
-                totalCachedMemories = memoryCache.memories.Count;
+                conversationCache = JsonConvert.DeserializeObject<CachedConversationList>(conversationsJson);
             }
-            catch (Exception ex)
+            
+            if (conversationCache == null)
             {
-                LogError($"Failed to load cache data: {ex.Message}");
                 conversationCache = new CachedConversationList();
+            }
+            
+            // Load memories on main thread
+            string memoriesJson = PlayerPrefs.GetString(MEMORIES_KEY, "");
+            if (!string.IsNullOrEmpty(memoriesJson))
+            {
+                memoryCache = JsonConvert.DeserializeObject<CachedMemoryList>(memoriesJson);
+            }
+            
+            if (memoryCache == null)
+            {
                 memoryCache = new CachedMemoryList();
             }
-        });
+            
+            totalCachedConversations = conversationCache.conversations.Count;
+            totalCachedMemories = memoryCache.memories.Count;
+        }
+        catch (Exception ex)
+        {
+            LogError($"Failed to load cache data: {ex.Message}");
+            conversationCache = new CachedConversationList();
+            memoryCache = new CachedMemoryList();
+        }
+        
+        return Task.CompletedTask;
     }
     
     private void LoadCacheStatistics()
@@ -170,36 +169,35 @@ public class MobileConversationCache : MonoBehaviour
         LogMessage($"Cache statistics loaded: {totalCachedConversations} conversations, {totalCachedMemories} memories");
     }
     
-    private async Task SaveCacheData()
+    private Task SaveCacheData()
     {
-        await Task.Run(() =>
+        try
         {
-            try
+            // Save conversations on main thread
+            string conversationsJson = JsonConvert.SerializeObject(conversationCache);
+            PlayerPrefs.SetString(CONVERSATIONS_KEY, conversationsJson);
+            
+            // Save memories on main thread
+            string memoriesJson = JsonConvert.SerializeObject(memoryCache);
+            PlayerPrefs.SetString(MEMORIES_KEY, memoriesJson);
+            
+            // Save statistics on main thread
+            var stats = new Dictionary<string, int>
             {
-                // Save conversations
-                string conversationsJson = JsonConvert.SerializeObject(conversationCache);
-                PlayerPrefs.SetString(CONVERSATIONS_KEY, conversationsJson);
-                
-                // Save memories
-                string memoriesJson = JsonConvert.SerializeObject(memoryCache);
-                PlayerPrefs.SetString(MEMORIES_KEY, memoriesJson);
-                
-                // Save statistics
-                var stats = new Dictionary<string, int>
-                {
-                    ["hits"] = cacheHits,
-                    ["misses"] = cacheMisses
-                };
-                string statsJson = JsonConvert.SerializeObject(stats);
-                PlayerPrefs.SetString(CACHE_STATS_KEY, statsJson);
-                
-                PlayerPrefs.Save();
-            }
-            catch (Exception ex)
-            {
-                LogError($"Failed to save cache data: {ex.Message}");
-            }
-        });
+                ["hits"] = cacheHits,
+                ["misses"] = cacheMisses
+            };
+            string statsJson = JsonConvert.SerializeObject(stats);
+            PlayerPrefs.SetString(CACHE_STATS_KEY, statsJson);
+            
+            PlayerPrefs.Save();
+        }
+        catch (Exception ex)
+        {
+            LogError($"Failed to save cache data: {ex.Message}");
+        }
+        
+        return Task.CompletedTask;
     }
     
     public async Task<bool> StoreConversationAsync(string userId, string userMessage, string assistantMessage, string sessionId = null, Dictionary<string, object> metadata = null)

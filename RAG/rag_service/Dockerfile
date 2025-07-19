@@ -24,4 +24,4 @@ RUN mkdir -p data/raw
 EXPOSE 8077
 
 # Run the application
-CMD ["python", "rag_api.py"]
+CMD ["uvicorn", "rag_api:app", "--host", "0.0.0.0", "--port", "8077"]

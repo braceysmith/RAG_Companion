@@ -106,8 +106,12 @@ embedding_cache = {}
 @app.on_event("startup")
 async def startup_event():
     """Initialize database on startup"""
-    await db.initialize()
-    print("RAG service started successfully")
+    try:
+        await db.initialize()
+        print("RAG service started successfully with database")
+    except Exception as e:
+        print(f"Database initialization failed: {e}")
+        print("RAG service started without database")
 
 @app.get("/health")
 async def health_check():
