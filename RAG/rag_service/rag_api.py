@@ -154,7 +154,10 @@ def rag_query_sync(request: dict):
                     }
                 ],
                 "query_embedding_ms": 0.0,
-                "db_lookup_ms": 0.0
+                "db_lookup_ms": 0.0,
+                "total_chunks": 1,
+                "session_id": f"session_{int(time.time())}",
+                "from_cache": False
             }
         
         # Search database
@@ -196,7 +199,10 @@ def rag_query_sync(request: dict):
         return {
             "results": results,
             "query_embedding_ms": embedding_time,
-            "db_lookup_ms": db_time
+            "db_lookup_ms": db_time,
+            "total_chunks": len(results),
+            "session_id": f"session_{int(time.time())}",
+            "from_cache": False
         }
         
     except Exception as e:
