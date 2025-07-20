@@ -243,9 +243,15 @@ public class MobileRAGClient : MonoBehaviour
                     if (webRequest.result == UnityWebRequest.Result.Success)
                     {
                         string responseText = webRequest.downloadHandler.text;
+                        LogMessage($"RAG API Response: {responseText}");
+                        
                         var response = JsonConvert.DeserializeObject<MobileRAGQueryResponse>(responseText);
                         
                         LogMessage($"RAG query successful (attempt {attempt + 1}): {response.results.Count} results");
+                        if (response.results.Count > 0)
+                        {
+                            LogMessage($"First result text: {response.results[0].text}");
+                        }
                         return response;
                     }
                     else

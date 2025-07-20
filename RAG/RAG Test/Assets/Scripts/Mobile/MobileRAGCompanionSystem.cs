@@ -318,12 +318,14 @@ public class MobileRAGCompanionSystem : MonoBehaviour
             
             // Query RAG system
             var ragResults = await ragClient.QueryAsync(message, userId, 5);
+            LogMessage($"RAG query completed, received {ragResults?.Count ?? 0} results");
             
             // Assemble context
             string context = contextAssembler.AssembleContextAsync(userId, ragResults, message);
             
-            // Generate response (simplified - in production, this would call your AI service)
-            string response = GenerateResponse(context, message);
+            // Generate response using RAG results
+            string response = GenerateResponseFromRAGResults(ragResults, message);
+            LogMessage($"Generated response: {response}");
             
             // Store response in cache
             if (conversationCache != null)
@@ -349,7 +351,23 @@ public class MobileRAGCompanionSystem : MonoBehaviour
                 offlineInteractions++;
             }
             
-            OnAssistantResponse?.Invoke(response);
+            try
+            {
+                OnAssistantResponse?.Invoke(response);
+                LogMessage($"Assistant response invoked successfully");
+                
+                // Also add the response to the UI directly
+                if (mobileUI != null)
+                {
+                    mobileUI.AddMessage(response, "assistant");
+                    mobileUI.ShowTypingIndicator(false);
+                    LogMessage($"Assistant response added to UI: {response.Substring(0, Math.Min(50, response.Length))}...");
+                }
+            }
+            catch (Exception ex)
+            {
+                LogError($"Error invoking assistant response: {ex.Message}");
+            }
             
             LogMessage($"Message processed in {responseTime:F2}s: {message}");
             
@@ -368,9 +386,21 @@ public class MobileRAGCompanionSystem : MonoBehaviour
         }
     }
     
+    private string GenerateResponseFromRAGResults(List<RAGResult> ragResults, string message)
+    {
+        // Use the actual RAG API response
+        if (ragResults != null && ragResults.Count > 0)
+        {
+            // Use the text from the first (highest scoring) result
+            return ragResults[0].text;
+        }
+        
+        return $"I understand you're asking about: {message}. However, I don't have enough context to provide a detailed response at the moment.";
+    }
+    
     private string GenerateResponse(string context, string message)
     {
-        // Simplified response generation
+        // Simplified response generation - kept for backward compatibility
         // In production, this would integrate with your AI service
         
         if (string.IsNullOrEmpty(context))
@@ -471,7 +501,9 @@ public class MobileRAGCompanionSystem : MonoBehaviour
     
     private async void HandleUserMessageSubmitted(string message)
     {
-        await SendMessageAsync(message);
+        LogMessage($"HandleUserMessageSubmitted called with message: {message}");
+        bool success = await SendMessageAsync(message);
+        LogMessage($"SendMessageAsync completed with success: {success}");
     }
     
     private void HandleSettingsChanged(Dictionary<string, object> settings)

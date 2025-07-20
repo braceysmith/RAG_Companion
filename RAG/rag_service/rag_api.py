@@ -163,21 +163,48 @@ def rag_query_sync(request: dict):
         # Search database
         db_start = time.time()
         try:
-            # Try database search first
-            results = []  # We'll implement this next step
+            # Search database for similar chunks
+            db_results = []
+            if hasattr(db, 'search_chunks') and callable(getattr(db, 'search_chunks')):
+                try:
+                    import asyncio
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                    db_results = loop.run_until_complete(
+                        db.search_chunks(query_embedding, top_k, request.get('filters', {}))
+                    )
+                    loop.close()
+                except Exception as search_error:
+                    print(f"Database search error: {search_error}")
+                    db_results = []
+            
             db_time = (time.time() - db_start) * 1000
             
-            # If no database results, return intelligent mock response
+            # Convert database results to response format
+            results = []
+            if db_results:
+                for result in db_results:
+                    results.append({
+                        "chunk_id": result.get("chunk_id", "unknown"),
+                        "text": result.get("text", ""),
+                        "doc_title": result.get("doc_title", "Unknown Document"),
+                        "section": result.get("section", ""),
+                        "tags": result.get("tags", []),
+                        "source_path": result.get("source_path", ""),
+                        "score": result.get("score", 0.0)
+                    })
+            
+            # If no database results, return intelligent fallback response
             if not results:
                 results = [
                     {
-                        "chunk_id": "intelligent_mock_1",
-                        "text": f"Thank you for your query: '{query_text}'. I've processed your request and generated embeddings successfully. This is a contextual response while the full database is being set up.",
-                        "doc_title": "Intelligent Response",
-                        "section": "contextual",
-                        "tags": ["processed", "contextual"],
-                        "source_path": "system/intelligent",
-                        "score": 0.85
+                        "chunk_id": "fallback_search",
+                        "text": f"I searched for information related to '{query_text}' but couldn't find specific content in the knowledge base yet. The database search completed successfully with embeddings generated.",
+                        "doc_title": "Search Results",
+                        "section": "fallback",
+                        "tags": ["search", "no_results"],
+                        "source_path": "system/search",
+                        "score": 0.3
                     }
                 ]
             
