@@ -202,7 +202,7 @@ MonoBehaviour:
   m_HandleRect: {fileID: 1118037512}
   m_Direction: 2
   m_Value: 0
-  m_Size: 0.99906015
+  m_Size: 1
   m_NumberOfSteps: 0
   m_OnValueChanged:
     m_PersistentCalls:
@@ -1046,7 +1046,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 7c0750769291b47bd9ddd1f5f712d31e, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  cloudRAGUrl: https://postgres-production-a8d2.up.railway.app
+  cloudRAGUrl: ragcompanion-production.up.railway.app
   userId: mobile-bracey01
   enableOfflineMode: 1
   enableAutoSync: 1

@@ -12,7 +12,7 @@ public class MobileRAGQueryRequest
     public string query;
     public string user_id;
     public int top_k = 5;
-    public Dictionary<string, object> metadata = new Dictionary<string, object>();
+    public Dictionary<string, object> filters = new Dictionary<string, object>();
 }
 
 [System.Serializable]
@@ -161,7 +161,7 @@ public class MobileRAGClient : MonoBehaviour
                 query = query,
                 user_id = userId,
                 top_k = topK,
-                metadata = new Dictionary<string, object>
+                filters = new Dictionary<string, object>
                 {
                     ["timestamp"] = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ"),
                     ["platform"] = Application.platform.ToString(),
