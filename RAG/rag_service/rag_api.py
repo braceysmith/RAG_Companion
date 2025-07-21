@@ -197,7 +197,14 @@ def rag_query_sync(request: dict):
             # If no database results, generate normal AI response
             if not results:
                 try:
-                    ai_response = generate_ai_response(query_text)
+                    import asyncio
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                    ai_response = loop.run_until_complete(
+                        generate_ai_response(query_text, user_id)
+                    )
+                    loop.close()
+                    
                     results = [
                         {
                             "chunk_id": "ai_generated",
@@ -368,21 +375,49 @@ def get_embedding(text: str) -> List[float]:
         print(f"Embedding error: {e}")
         raise
 
-def generate_ai_response(query: str) -> str:
+async def generate_ai_response(query: str, user_id: str = None) -> str:
     """Generate a normal AI response when no RAG content is found"""
     try:
+        # Check if we have any stored memories for this user
+        memory_context = ""
+        if user_id and hasattr(db, 'get_user_memory_summary'):
+            try:
+                memory_summary = await db.get_user_memory_summary(user_id)
+                if memory_summary:
+                    memory_context = f"\n\nRELEVANT USER CONTEXT:\n{memory_summary}"
+            except Exception as e:
+                print(f"Memory retrieval error: {e}")
+        
+        system_prompt = f"""You are a RAG (Retrieval-Augmented Generation) AI assistant with the following capabilities:
+
+MEMORY & KNOWLEDGE:
+- I can remember and store user conversations, preferences, and personal information
+- I have access to a knowledge base of documents that have been ingested
+- I can store and retrieve different types of memories: episodic (conversations), semantic (facts), and profile (personal details)
+- I search through my knowledge base for every query to provide contextual responses
+
+CURRENT STATUS:
+- I just searched my knowledge base but didn't find relevant content for this query
+- This means either: the information hasn't been added to my knowledge base yet, or this is a general question that doesn't require specific stored knowledge
+- I can still help with general questions, conversations, and provide assistance based on my training
+
+WHAT I CAN REMEMBER:
+- Previous conversations we've had
+- Personal details you've shared with me
+- Preferences and interests you've mentioned
+- Any documents or information that have been added to my knowledge base
+- Context from our ongoing conversation
+
+If asked about my memory capabilities, I should explain these features. Otherwise, I'll provide helpful responses to general questions.{memory_context}"""
+
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": query}
+        ]
+        
         response = client.chat.completions.create(
             model="gpt-3.5-turbo",
-            messages=[
-                {
-                    "role": "system", 
-                    "content": "You are a helpful AI assistant. Provide clear, concise, and helpful responses to user questions."
-                },
-                {
-                    "role": "user", 
-                    "content": query
-                }
-            ],
+            messages=messages,
             max_tokens=500,
             temperature=0.7
         )
