@@ -133,8 +133,11 @@ def rag_query_sync(request: dict):
         user_id = request.get('user_id', 'anonymous')
         top_k = request.get('top_k', 5)
         
-        # Store user message for future memory/context
-        asyncio.run(store_user_interaction(user_id, query_text, "user"))
+        # Store user message for future memory/context (with error handling)
+        try:
+            asyncio.run(store_user_interaction(user_id, query_text, "user"))
+        except Exception as store_error:
+            print(f"Warning: Could not store user interaction: {store_error}")
         
         # Get query embedding
         embedding_start = time.time()
@@ -248,11 +251,14 @@ def rag_query_sync(request: dict):
                 }
             ]
         
-        # Store AI response for future memory/context
-        if results and len(results) > 0:
-            ai_response_text = results[0].get("text", "")
-            if ai_response_text:
-                asyncio.run(store_user_interaction(user_id, ai_response_text, "assistant"))
+        # Store AI response for future memory/context (with error handling)
+        try:
+            if results and len(results) > 0:
+                ai_response_text = results[0].get("text", "")
+                if ai_response_text:
+                    asyncio.run(store_user_interaction(user_id, ai_response_text, "assistant"))
+        except Exception as store_error:
+            print(f"Warning: Could not store AI response: {store_error}")
         
         return {
             "results": results,
@@ -291,6 +297,15 @@ async def store_memory(request: MemoryRequest):
 async def get_user_profile(user_id: str):
     """Get stored profile information for a user"""
     try:
+        # Check if database supports memory operations
+        if not hasattr(db, 'search_user_memory'):
+            return {
+                "user_id": user_id,
+                "profile_memories": [],
+                "total_memories": 0,
+                "message": "Memory system not available"
+            }
+        
         # Get all profile memories for this user
         profile_memories = await db.search_user_memory(
             user_id=user_id,
@@ -314,7 +329,13 @@ async def get_user_profile(user_id: str):
         }
         
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Profile retrieval failed: {str(e)}")
+        print(f"Error retrieving user profile: {e}")
+        return {
+            "user_id": user_id,
+            "profile_memories": [],
+            "total_memories": 0,
+            "error": str(e)
+        }
 
 @app.post("/memory/query", response_model=MemoryQueryResponse)
 async def query_memory(request: MemoryQueryRequest):
@@ -392,6 +413,11 @@ async def ingest_documents(request: IngestionRequest, background_tasks: Backgrou
 async def store_user_interaction(user_id: str, message: str, role: str):
     """Store user interactions for memory/context building"""
     try:
+        # Only store if we have a valid database connection and the required method exists
+        if not hasattr(db, 'upsert_user_memory'):
+            print("Database does not support user memory storage")
+            return
+            
         # Check if this looks like personal information that should be stored as memory
         personal_indicators = ["my name is", "i am", "call me", "i'm", "my name's", "i work", "i live", "my age"]
         if any(indicator in message.lower() for indicator in personal_indicators):
@@ -414,10 +440,16 @@ async def store_user_interaction(user_id: str, message: str, role: str):
             )
     except Exception as e:
         print(f"Error storing user interaction: {e}")
+        # Don't re-raise the exception to avoid breaking the main flow
 
 async def get_user_memory_context(user_id: str, query: str) -> str:
     """Retrieve relevant user memories for context"""
     try:
+        # Only search if we have a valid database connection and the required method exists
+        if not hasattr(db, 'search_user_memory'):
+            print("Database does not support user memory search")
+            return ""
+            
         # Get embedding for current query to find relevant memories
         query_embedding = get_embedding(query)
         
