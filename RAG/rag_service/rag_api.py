@@ -4,7 +4,7 @@ import asyncio
 from typing import List, Optional, Dict, Any
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, BackgroundTasks
+from fastapi import FastAPI, HTTPException, BackgroundTasks, WebSocket, WebSocketDisconnect, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from openai import OpenAI
@@ -13,6 +13,7 @@ from dotenv import load_dotenv
 from database import RAGDatabase
 from chunker import DocumentChunker, DocumentProcessor
 from mcp_tools import tool_manager
+from audio_handler import audio_handler
 
 # Load environment variables
 load_dotenv()
@@ -101,6 +102,22 @@ class IngestionRequest(BaseModel):
     user_scope: str = "global"
     safety_level: str = "public"
 
+class AudioRequest(BaseModel):
+    user_id: str
+    audio_format: str = "webm"
+
+class AudioResponse(BaseModel):
+    transcript: str
+    response_text: str
+    audio_response: Optional[str] = None  # Base64 encoded audio
+    tool_result: Optional[Dict[str, Any]] = None
+    personal_info: Optional[Dict[str, Any]] = None
+
+class TTSRequest(BaseModel):
+    text: str
+    voice: str = "alloy"
+    user_id: Optional[str] = None
+
 # Global state
 embedding_cache = {}
 user_profiles = {}  # Simple in-memory storage for personal info
@@ -166,6 +183,100 @@ def get_available_tools():
         }
     except Exception as e:
         return {"error": str(e), "available_tools": []}
+
+@app.websocket("/ws/realtime/{user_id}")
+async def websocket_realtime_endpoint(websocket: WebSocket, user_id: str):
+    """WebSocket endpoint for real-time audio communication"""
+    await websocket.accept()
+    try:
+        # Get user profile for context
+        user_profile = user_profiles.get(user_id, {})
+        
+        # Handle real-time WebSocket communication
+        await audio_handler.handle_realtime_websocket(websocket, user_id, user_profile)
+        
+    except WebSocketDisconnect:
+        print(f"WebSocket disconnected for user {user_id}")
+    except Exception as e:
+        print(f"WebSocket error for user {user_id}: {e}")
+        await websocket.close()
+
+@app.post("/audio/speech-to-text", response_model=dict)
+async def speech_to_text_endpoint(
+    audio: UploadFile = File(...),
+    user_id: str = "anonymous",
+    audio_format: str = "webm"
+):
+    """Convert speech to text using OpenAI Whisper"""
+    try:
+        # Read audio file
+        audio_data = await audio.read()
+        
+        # Process with Whisper
+        transcript = await audio_handler.speech_to_text(audio_data, audio_format)
+        
+        return {
+            "transcript": transcript,
+            "user_id": user_id,
+            "status": "success"
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Speech-to-text failed: {str(e)}")
+
+@app.post("/audio/text-to-speech")
+async def text_to_speech_endpoint(request: TTSRequest):
+    """Convert text to speech using OpenAI TTS"""
+    try:
+        # Generate audio
+        audio_data = await audio_handler.text_to_speech(request.text, request.voice)
+        
+        # Encode as base64 for JSON response
+        import base64
+        audio_base64 = base64.b64encode(audio_data).decode()
+        
+        return {
+            "audio_data": audio_base64,
+            "format": "mp3",
+            "text": request.text,
+            "voice": request.voice,
+            "status": "success"
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Text-to-speech failed: {str(e)}")
+
+@app.post("/audio/process", response_model=AudioResponse)
+async def process_audio_endpoint(
+    audio: UploadFile = File(...),
+    user_id: str = "anonymous",
+    audio_format: str = "webm"
+):
+    """Process audio input with full RAG and tool integration"""
+    try:
+        # Read audio file
+        audio_data = await audio.read()
+        
+        # Get user profile
+        user_profile = user_profiles.get(user_id, {})
+        
+        # Process audio with tools integration
+        result = await audio_handler.process_audio_with_tools(audio_data, user_id, user_profile)
+        
+        # Encode audio response as base64
+        import base64
+        audio_base64 = base64.b64encode(result["audio_response"]).decode()
+        
+        return AudioResponse(
+            transcript=result["transcript"],
+            response_text=result["response_text"],
+            audio_response=audio_base64,
+            tool_result=result.get("tool_result"),
+            personal_info=result.get("personal_info")
+        )
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Audio processing failed: {str(e)}")
 
 def extract_personal_info(message: str) -> dict:
     """Extract personal information from user messages"""
@@ -356,7 +467,7 @@ Key behaviors:
         ]
         
         response = client.chat.completions.create(
-            model="gpt-3.5-turbo",
+            model="gpt-4o-mini-realtime-preview",
             messages=messages,
             max_tokens=400,
             temperature=0.8  # More creative for conversation
@@ -827,7 +938,7 @@ If asked about my memory capabilities, I should explain these features. For well
         ]
         
         response = client.chat.completions.create(
-            model="gpt-3.5-turbo",
+            model="gpt-4o-mini-realtime-preview",
             messages=messages,
             max_tokens=500,
             temperature=0.7
