@@ -396,6 +396,12 @@ MEMORY & KNOWLEDGE:
 - I can store and retrieve different types of memories: episodic (conversations), semantic (facts), and profile (personal details)
 - I search through my knowledge base for every query to provide contextual responses
 
+SPECIAL KNOWLEDGE:
+- I have access to a comprehensive wellbeing framework with 6 levels: Essential Needs, Safety Needs, Digital Well-Being, Love & Belonging, Esteem Needs, and Self-Actualization
+- Each area has multiple categories with 4-tier progressions for self-assessment and growth
+- I can help with personal development discussions, self-assessment, and goal-setting using this framework
+- The framework includes modern digital wellbeing alongside traditional needs hierarchy
+
 CURRENT STATUS:
 - I just searched my knowledge base but didn't find relevant content for this query
 - This means either: the information hasn't been added to my knowledge base yet, or this is a general question that doesn't require specific stored knowledge
@@ -407,8 +413,9 @@ WHAT I CAN REMEMBER:
 - Preferences and interests you've mentioned
 - Any documents or information that have been added to my knowledge base
 - Context from our ongoing conversation
+- Your progress and reflections on wellbeing areas if you've shared them
 
-If asked about my memory capabilities, I should explain these features. Otherwise, I'll provide helpful responses to general questions.{memory_context}"""
+If asked about my memory capabilities, I should explain these features. For wellbeing discussions, I can reference the framework even when not directly retrieved from search.{memory_context}"""
 
         messages = [
             {"role": "system", "content": system_prompt},
