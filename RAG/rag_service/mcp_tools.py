@@ -1,6 +1,6 @@
 """
-MCP Tools for RAG Companion System
-Modular tool system that's easy to extend
+Tool System for RAG Companion System
+Modular tool system that's easy to extend (MCP-inspired but standalone)
 """
 
 import json
