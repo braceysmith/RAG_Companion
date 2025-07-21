@@ -12,6 +12,7 @@ from dotenv import load_dotenv
 
 from database import RAGDatabase
 from chunker import DocumentChunker, DocumentProcessor
+from mcp_tools import tool_manager
 
 # Load environment variables
 load_dotenv()
@@ -154,6 +155,18 @@ def get_user_profile_simple(user_id: str):
     except Exception as e:
         return {"error": str(e), "user_id": user_id, "profile": {}}
 
+@app.get("/tools")
+def get_available_tools():
+    """Get list of available MCP tools"""
+    try:
+        tools = tool_manager.get_available_tools()
+        return {
+            "available_tools": tools,
+            "total_count": len(tools)
+        }
+    except Exception as e:
+        return {"error": str(e), "available_tools": []}
+
 def extract_personal_info(message: str) -> dict:
     """Extract personal information from user messages"""
     personal_info = {}
@@ -285,12 +298,15 @@ def get_user_name(user_id: str) -> str:
         print(f"Could not retrieve user name: {e}")
         return ""
 
-def generate_conversational_response(user_id: str, query: str, personal_info: dict) -> str:
-    """Generate a fluid conversational response with personal context"""
+async def generate_conversational_response(user_id: str, query: str, personal_info: dict) -> str:
+    """Generate a fluid conversational response with personal context and tools"""
     try:
         # Get user profile and conversation context
         user_profile = user_profiles.get(user_id, {})
         conversation_context = get_conversation_context(user_id)
+        
+        # Check if user is asking for something that needs a tool
+        tool_result = await check_and_use_tools(query, user_profile)
         
         # Build comprehensive context for the AI
         system_content = """You are a conversational AI companion that remembers personal details and maintains fluid conversation. 
@@ -301,7 +317,8 @@ Key behaviors:
 - Ask follow-up questions to learn more about the user
 - Be genuinely interested in their life, work, and interests
 - Make connections between different pieces of information they've shared
-- Respond in a warm, engaging, and personal way"""
+- Respond in a warm, engaging, and personal way
+- When you have tool results, incorporate them naturally into the conversation"""
 
         # Add personal context if available
         if user_profile:
@@ -328,6 +345,10 @@ Key behaviors:
         # Handle personal information sharing
         if personal_info:
             system_content += f"\n\nThe user just shared new personal information: {personal_info}"
+            
+        # Add tool results if available
+        if tool_result:
+            system_content += f"\n\nTool result: {tool_result['message']}"
         
         messages = [
             {"role": "system", "content": system_content},
@@ -351,6 +372,54 @@ Key behaviors:
             return f"Hi {user_name}! I'm having a moment here, but I'm listening. What's on your mind?"
         else:
             return "I'm having a small technical hiccup, but I'm here. What would you like to talk about?"
+
+async def check_and_use_tools(query: str, user_profile: dict) -> Optional[dict]:
+    """Check if query needs tool usage and execute if needed"""
+    query_lower = query.lower()
+    
+    # Weather tool detection
+    weather_keywords = ["weather", "temperature", "forecast", "rain", "sunny", "cloudy", "hot", "cold"]
+    if any(keyword in query_lower for keyword in weather_keywords):
+        # Try to extract location from query or use user's stored location
+        location = extract_location_from_query(query) or user_profile.get("location", "")
+        
+        if location:
+            return await tool_manager.execute_tool("get_weather", location=location)
+        else:
+            return {
+                "success": False,
+                "message": "I'd love to check the weather for you! Which city or location would you like to know about?"
+            }
+    
+    # Easy to add more tool detections here:
+    # if "schedule" in query_lower or "calendar" in query_lower:
+    #     return await tool_manager.execute_tool("get_calendar")
+    
+    return None
+
+def extract_location_from_query(query: str) -> str:
+    """Extract location from weather-related queries"""
+    query_lower = query.lower()
+    
+    # Simple location extraction patterns
+    location_patterns = [
+        "weather in ",
+        "weather for ",
+        "temperature in ",
+        "temperature for ",
+        "forecast for ",
+        "forecast in "
+    ]
+    
+    for pattern in location_patterns:
+        if pattern in query_lower:
+            start = query_lower.find(pattern) + len(pattern)
+            # Extract location (take words until punctuation or end)
+            location_part = query[start:].split('?')[0].split('.')[0].split('!')[0].strip()
+            if location_part:
+                return location_part
+    
+    return ""
 
 @app.post("/query")
 def rag_query_sync(request: dict):
@@ -425,8 +494,14 @@ def rag_query_sync(request: dict):
             
             # Generate conversational response (RAG or personal AI response)
             if not results:
-                # Generate fluid conversational response
-                response_text = generate_conversational_response(user_id, query_text, personal_info)
+                # Generate fluid conversational response with tool support
+                import asyncio
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                response_text = loop.run_until_complete(
+                    generate_conversational_response(user_id, query_text, personal_info)
+                )
+                loop.close()
                 
                 results = [
                     {
