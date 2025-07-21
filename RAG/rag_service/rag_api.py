@@ -221,6 +221,36 @@ def get_user_name(user_id: str) -> str:
         print(f"Could not retrieve user name: {e}")
         return ""
 
+def generate_normal_ai_response(query: str, user_name: str = "") -> str:
+    """Generate a normal AI response using OpenAI when no RAG content is found"""
+    try:
+        # Create a personalized system prompt
+        system_content = "You are a helpful AI assistant. Provide clear, concise, and helpful responses to user questions."
+        if user_name:
+            system_content += f" The user's name is {user_name}, so you can address them personally when appropriate."
+        
+        messages = [
+            {"role": "system", "content": system_content},
+            {"role": "user", "content": query}
+        ]
+        
+        response = client.chat.completions.create(
+            model="gpt-3.5-turbo",
+            messages=messages,
+            max_tokens=300,
+            temperature=0.7
+        )
+        
+        return response.choices[0].message.content.strip()
+        
+    except Exception as e:
+        print(f"AI response generation error: {e}")
+        # Fallback to a basic response if OpenAI fails
+        if user_name:
+            return f"Hi {user_name}! I'm having trouble generating a detailed response right now, but I'm here to help. Could you try asking your question again?"
+        else:
+            return "I'm having trouble generating a detailed response right now, but I'm here to help. Could you try asking your question again?"
+
 @app.post("/query")
 def rag_query_sync(request: dict):
     """Main RAG query endpoint with full RAG functionality"""
@@ -292,7 +322,7 @@ def rag_query_sync(request: dict):
                         "score": result.get("score", 0.0)
                     })
             
-            # If no database results, return intelligent response
+            # If no database results, generate normal AI response
             if not results:
                 # Check if user just told us their name
                 user_name = get_user_name(user_id)
@@ -307,15 +337,16 @@ def rag_query_sync(request: dict):
                     else:
                         response_text = "I don't have your name stored yet. You can tell me by saying 'My name is [your name]' and I'll remember it for next time."
                 else:
-                    response_text = f"I received your message: '{query_text}'. I'm currently operating with basic functionality while some features are being configured."
+                    # Generate normal AI response using OpenAI
+                    response_text = generate_normal_ai_response(query_text, user_name)
                 
                 results = [
                     {
-                        "chunk_id": "intelligent_response",
+                        "chunk_id": "ai_response",
                         "text": response_text,
                         "doc_title": "AI Response", 
-                        "section": "intelligent",
-                        "tags": ["ai", "personal"] if personal_info else ["ai", "basic"],
+                        "section": "generated",
+                        "tags": ["ai", "personal"] if personal_info else ["ai", "general"],
                         "source_path": "system/ai",
                         "score": 0.8
                     }
