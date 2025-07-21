@@ -133,6 +133,9 @@ def rag_query_sync(request: dict):
         user_id = request.get('user_id', 'anonymous')
         top_k = request.get('top_k', 5)
         
+        # Store user message for future memory/context
+        asyncio.run(store_user_interaction(user_id, query_text, "user"))
+        
         # Get query embedding
         embedding_start = time.time()
         try:
@@ -245,6 +248,12 @@ def rag_query_sync(request: dict):
                 }
             ]
         
+        # Store AI response for future memory/context
+        if results and len(results) > 0:
+            ai_response_text = results[0].get("text", "")
+            if ai_response_text:
+                asyncio.run(store_user_interaction(user_id, ai_response_text, "assistant"))
+        
         return {
             "results": results,
             "query_embedding_ms": embedding_time,
@@ -277,6 +286,35 @@ async def store_memory(request: MemoryRequest):
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Memory storage failed: {str(e)}")
+
+@app.get("/memory/profile/{user_id}")
+async def get_user_profile(user_id: str):
+    """Get stored profile information for a user"""
+    try:
+        # Get all profile memories for this user
+        profile_memories = await db.search_user_memory(
+            user_id=user_id,
+            query_embedding=get_embedding("profile information name details"),  # General profile query
+            memory_types=["profile"],
+            top_k=20
+        )
+        
+        profile_data = []
+        for memory in profile_memories:
+            profile_data.append({
+                "content": memory.get("content", ""),
+                "metadata": memory.get("metadata", {}),
+                "score": memory.get("score", 0.0)
+            })
+        
+        return {
+            "user_id": user_id,
+            "profile_memories": profile_data,
+            "total_memories": len(profile_data)
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Profile retrieval failed: {str(e)}")
 
 @app.post("/memory/query", response_model=MemoryQueryResponse)
 async def query_memory(request: MemoryQueryRequest):
@@ -351,6 +389,61 @@ async def ingest_documents(request: IngestionRequest, background_tasks: Backgrou
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Ingestion failed: {str(e)}")
 
+async def store_user_interaction(user_id: str, message: str, role: str):
+    """Store user interactions for memory/context building"""
+    try:
+        # Check if this looks like personal information that should be stored as memory
+        personal_indicators = ["my name is", "i am", "call me", "i'm", "my name's", "i work", "i live", "my age"]
+        if any(indicator in message.lower() for indicator in personal_indicators):
+            # This looks like personal information - store as semantic memory
+            await db.upsert_user_memory(
+                user_id=user_id,
+                memory_type="profile", 
+                content=message,
+                embedding=get_embedding(message),
+                metadata={"interaction_type": "personal_info", "role": role}
+            )
+        else:
+            # Store as episodic memory (conversation history)
+            await db.upsert_user_memory(
+                user_id=user_id,
+                memory_type="episodic",
+                content=message, 
+                embedding=get_embedding(message),
+                metadata={"interaction_type": "conversation", "role": role}
+            )
+    except Exception as e:
+        print(f"Error storing user interaction: {e}")
+
+async def get_user_memory_context(user_id: str, query: str) -> str:
+    """Retrieve relevant user memories for context"""
+    try:
+        # Get embedding for current query to find relevant memories
+        query_embedding = get_embedding(query)
+        
+        # Search for relevant memories
+        memories = await db.search_user_memory(
+            user_id=user_id,
+            query_embedding=query_embedding,
+            memory_types=["profile", "episodic"],
+            top_k=5
+        )
+        
+        if memories:
+            context_parts = []
+            for memory in memories:
+                memory_type = memory.get("memory_type", "unknown")
+                content = memory.get("content", "")
+                context_parts.append(f"[{memory_type.upper()}] {content}")
+            
+            return "RELEVANT USER MEMORIES:\n" + "\n".join(context_parts)
+        
+        return ""
+        
+    except Exception as e:
+        print(f"Error retrieving user memory: {e}")
+        return ""
+
 def get_embedding(text: str) -> List[float]:
     """Get embedding for text with caching"""
     import hashlib
@@ -378,13 +471,13 @@ def get_embedding(text: str) -> List[float]:
 async def generate_ai_response(query: str, user_id: str = None) -> str:
     """Generate a normal AI response when no RAG content is found"""
     try:
-        # Check if we have any stored memories for this user
+        # Get relevant user memories for context
         memory_context = ""
-        if user_id and hasattr(db, 'get_user_memory_summary'):
+        if user_id:
             try:
-                memory_summary = await db.get_user_memory_summary(user_id)
-                if memory_summary:
-                    memory_context = f"\n\nRELEVANT USER CONTEXT:\n{memory_summary}"
+                user_memories = await get_user_memory_context(user_id, query)
+                if user_memories:
+                    memory_context = f"\n\n{user_memories}"
             except Exception as e:
                 print(f"Memory retrieval error: {e}")
         
