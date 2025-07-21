@@ -133,11 +133,11 @@ def rag_query_sync(request: dict):
         user_id = request.get('user_id', 'anonymous')
         top_k = request.get('top_k', 5)
         
-        # Store user message for future memory/context (with error handling)
-        try:
-            asyncio.run(store_user_interaction(user_id, query_text, "user"))
-        except Exception as store_error:
-            print(f"Warning: Could not store user interaction: {store_error}")
+        # Store user message for future memory/context (disabled for now to prevent errors)
+        # try:
+        #     asyncio.run(store_user_interaction(user_id, query_text, "user"))
+        # except Exception as store_error:
+        #     print(f"Warning: Could not store user interaction: {store_error}")
         
         # Get query embedding
         embedding_start = time.time()
@@ -251,14 +251,14 @@ def rag_query_sync(request: dict):
                 }
             ]
         
-        # Store AI response for future memory/context (with error handling)
-        try:
-            if results and len(results) > 0:
-                ai_response_text = results[0].get("text", "")
-                if ai_response_text:
-                    asyncio.run(store_user_interaction(user_id, ai_response_text, "assistant"))
-        except Exception as store_error:
-            print(f"Warning: Could not store AI response: {store_error}")
+        # Store AI response for future memory/context (disabled for now to prevent errors)
+        # try:
+        #     if results and len(results) > 0:
+        #         ai_response_text = results[0].get("text", "")
+        #         if ai_response_text:
+        #             asyncio.run(store_user_interaction(user_id, ai_response_text, "assistant"))
+        # except Exception as store_error:
+        #     print(f"Warning: Could not store AI response: {store_error}")
         
         return {
             "results": results,
@@ -503,15 +503,15 @@ def get_embedding(text: str) -> List[float]:
 async def generate_ai_response(query: str, user_id: str = None) -> str:
     """Generate a normal AI response when no RAG content is found"""
     try:
-        # Get relevant user memories for context
+        # Get relevant user memories for context (disabled temporarily to prevent errors)
         memory_context = ""
-        if user_id:
-            try:
-                user_memories = await get_user_memory_context(user_id, query)
-                if user_memories:
-                    memory_context = f"\n\n{user_memories}"
-            except Exception as e:
-                print(f"Memory retrieval error: {e}")
+        # if user_id:
+        #     try:
+        #         user_memories = await get_user_memory_context(user_id, query)
+        #         if user_memories:
+        #             memory_context = f"\n\n{user_memories}"
+        #     except Exception as e:
+        #         print(f"Memory retrieval error: {e}")
         
         system_prompt = f"""You are a RAG (Retrieval-Augmented Generation) AI assistant with the following capabilities:
 
