@@ -194,19 +194,34 @@ def rag_query_sync(request: dict):
                         "score": result.get("score", 0.0)
                     })
             
-            # If no database results, return intelligent fallback response
+            # If no database results, generate normal AI response
             if not results:
-                results = [
-                    {
-                        "chunk_id": "fallback_search",
-                        "text": f"I searched for information related to '{query_text}' but couldn't find specific content in the knowledge base yet. The database search completed successfully with embeddings generated.",
-                        "doc_title": "Search Results",
-                        "section": "fallback",
-                        "tags": ["search", "no_results"],
-                        "source_path": "system/search",
-                        "score": 0.3
-                    }
-                ]
+                try:
+                    ai_response = generate_ai_response(query_text)
+                    results = [
+                        {
+                            "chunk_id": "ai_generated",
+                            "text": ai_response,
+                            "doc_title": "AI Response",
+                            "section": "generated",
+                            "tags": ["ai_generated", "no_rag"],
+                            "source_path": "system/ai",
+                            "score": 0.7
+                        }
+                    ]
+                except Exception as ai_error:
+                    print(f"AI response generation error: {ai_error}")
+                    results = [
+                        {
+                            "chunk_id": "fallback_search",
+                            "text": f"I understand your question about '{query_text}', but I'm currently unable to provide a detailed response.",
+                            "doc_title": "System Response",
+                            "section": "fallback",
+                            "tags": ["fallback", "error"],
+                            "source_path": "system/fallback",
+                            "score": 0.3
+                        }
+                    ]
             
         except Exception as db_error:
             print(f"Database error: {db_error}")
@@ -351,6 +366,31 @@ def get_embedding(text: str) -> List[float]:
         
     except Exception as e:
         print(f"Embedding error: {e}")
+        raise
+
+def generate_ai_response(query: str) -> str:
+    """Generate a normal AI response when no RAG content is found"""
+    try:
+        response = client.chat.completions.create(
+            model="gpt-3.5-turbo",
+            messages=[
+                {
+                    "role": "system", 
+                    "content": "You are a helpful AI assistant. Provide clear, concise, and helpful responses to user questions."
+                },
+                {
+                    "role": "user", 
+                    "content": query
+                }
+            ],
+            max_tokens=500,
+            temperature=0.7
+        )
+        
+        return response.choices[0].message.content.strip()
+        
+    except Exception as e:
+        print(f"AI response generation error: {e}")
         raise
 
 async def ingest_directory(directory_path: Path, user_scope: str, safety_level: str):
