@@ -103,6 +103,7 @@ class IngestionRequest(BaseModel):
 # Global state
 embedding_cache = {}
 user_profiles = {}  # Simple in-memory storage for personal info
+user_conversations = {}  # Store recent conversation history for context
 
 @app.on_event("startup")
 async def startup_event():
@@ -167,18 +168,81 @@ def extract_personal_info(message: str) -> dict:
         ("my name's ", "name")
     ]
     
-    for pattern, info_type in name_patterns:
+    # Work/profession patterns
+    work_patterns = [
+        ("i work as ", "job"),
+        ("i'm a ", "job"),
+        ("i am a ", "job"),
+        ("my job is ", "job"),
+        ("i work at ", "workplace"),
+        ("i work for ", "workplace")
+    ]
+    
+    # Interest/hobby patterns
+    interest_patterns = [
+        ("i like ", "interest"),
+        ("i love ", "interest"), 
+        ("i enjoy ", "interest"),
+        ("i'm interested in ", "interest"),
+        ("my hobby is ", "hobby")
+    ]
+    
+    # Location patterns
+    location_patterns = [
+        ("i live in ", "location"),
+        ("i'm from ", "origin"),
+        ("i live at ", "location")
+    ]
+    
+    all_patterns = name_patterns + work_patterns + interest_patterns + location_patterns
+    
+    for pattern, info_type in all_patterns:
         if pattern in message_lower:
             start = message_lower.find(pattern) + len(pattern)
-            # Find the end of the name (next punctuation or space before next word)
+            # Extract relevant information
             rest = message[start:].split()
             if rest:
-                name = rest[0].strip('.,!?')
-                if len(name) > 1 and name.isalpha():
-                    personal_info[info_type] = name.title()
-                    break
+                if info_type == "name":
+                    value = rest[0].strip('.,!?')
+                    if len(value) > 1 and value.isalpha():
+                        personal_info[info_type] = value.title()
+                else:
+                    # For other info, take a few words
+                    value = " ".join(rest[:3]).strip('.,!?')
+                    if len(value) > 1:
+                        personal_info[info_type] = value
+                break
     
     return personal_info
+
+def store_conversation_turn(user_id: str, user_message: str, ai_response: str):
+    """Store conversation turn for context"""
+    import time
+    if user_id not in user_conversations:
+        user_conversations[user_id] = []
+    
+    # Add new turn
+    user_conversations[user_id].append({
+        "user": user_message,
+        "assistant": ai_response,
+        "timestamp": time.time()
+    })
+    
+    # Keep only last 5 conversation turns
+    if len(user_conversations[user_id]) > 5:
+        user_conversations[user_id] = user_conversations[user_id][-5:]
+
+def get_conversation_context(user_id: str) -> str:
+    """Get recent conversation context"""
+    if user_id not in user_conversations:
+        return ""
+    
+    context_parts = []
+    for turn in user_conversations[user_id][-3:]:  # Last 3 turns
+        context_parts.append(f"User: {turn['user']}")
+        context_parts.append(f"Assistant: {turn['assistant']}")
+    
+    return "\n".join(context_parts) if context_parts else ""
 
 def store_personal_info_simple(user_id: str, info: dict):
     """Store personal information in a simple way"""
@@ -221,13 +285,49 @@ def get_user_name(user_id: str) -> str:
         print(f"Could not retrieve user name: {e}")
         return ""
 
-def generate_normal_ai_response(query: str, user_name: str = "") -> str:
-    """Generate a normal AI response using OpenAI when no RAG content is found"""
+def generate_conversational_response(user_id: str, query: str, personal_info: dict) -> str:
+    """Generate a fluid conversational response with personal context"""
     try:
-        # Create a personalized system prompt
-        system_content = "You are a helpful AI assistant. Provide clear, concise, and helpful responses to user questions."
-        if user_name:
-            system_content += f" The user's name is {user_name}, so you can address them personally when appropriate."
+        # Get user profile and conversation context
+        user_profile = user_profiles.get(user_id, {})
+        conversation_context = get_conversation_context(user_id)
+        
+        # Build comprehensive context for the AI
+        system_content = """You are a conversational AI companion that remembers personal details and maintains fluid conversation. 
+
+Key behaviors:
+- Naturally incorporate what you know about the user into responses
+- Reference previous conversation topics when relevant
+- Ask follow-up questions to learn more about the user
+- Be genuinely interested in their life, work, and interests
+- Make connections between different pieces of information they've shared
+- Respond in a warm, engaging, and personal way"""
+
+        # Add personal context if available
+        if user_profile:
+            profile_text = []
+            if "name" in user_profile:
+                profile_text.append(f"User's name: {user_profile['name']}")
+            if "job" in user_profile:
+                profile_text.append(f"Job: {user_profile['job']}")
+            if "workplace" in user_profile:
+                profile_text.append(f"Workplace: {user_profile['workplace']}")
+            if "location" in user_profile:
+                profile_text.append(f"Lives in: {user_profile['location']}")
+            if "interest" in user_profile or "hobby" in user_profile:
+                interests = user_profile.get("interest", "") + " " + user_profile.get("hobby", "")
+                profile_text.append(f"Interests: {interests.strip()}")
+                
+            if profile_text:
+                system_content += f"\n\nWhat you know about this user:\n" + "\n".join(profile_text)
+        
+        # Add conversation context if available
+        if conversation_context:
+            system_content += f"\n\nRecent conversation:\n{conversation_context}"
+            
+        # Handle personal information sharing
+        if personal_info:
+            system_content += f"\n\nThe user just shared new personal information: {personal_info}"
         
         messages = [
             {"role": "system", "content": system_content},
@@ -237,19 +337,20 @@ def generate_normal_ai_response(query: str, user_name: str = "") -> str:
         response = client.chat.completions.create(
             model="gpt-3.5-turbo",
             messages=messages,
-            max_tokens=300,
-            temperature=0.7
+            max_tokens=400,
+            temperature=0.8  # More creative for conversation
         )
         
         return response.choices[0].message.content.strip()
         
     except Exception as e:
-        print(f"AI response generation error: {e}")
-        # Fallback to a basic response if OpenAI fails
+        print(f"Conversational response generation error: {e}")
+        # Fallback with personal touch if possible
+        user_name = user_profiles.get(user_id, {}).get("name", "")
         if user_name:
-            return f"Hi {user_name}! I'm having trouble generating a detailed response right now, but I'm here to help. Could you try asking your question again?"
+            return f"Hi {user_name}! I'm having a moment here, but I'm listening. What's on your mind?"
         else:
-            return "I'm having trouble generating a detailed response right now, but I'm here to help. Could you try asking your question again?"
+            return "I'm having a small technical hiccup, but I'm here. What would you like to talk about?"
 
 @app.post("/query")
 def rag_query_sync(request: dict):
@@ -322,33 +423,20 @@ def rag_query_sync(request: dict):
                         "score": result.get("score", 0.0)
                     })
             
-            # If no database results, generate normal AI response
+            # Generate conversational response (RAG or personal AI response)
             if not results:
-                # Check if user just told us their name
-                user_name = get_user_name(user_id)
-                response_text = ""
-                
-                if personal_info and "name" in personal_info:
-                    name = personal_info["name"]
-                    response_text = f"Nice to meet you, {name}! I've made a note of your name and will remember it for future conversations. How can I help you today?"
-                elif "what" in query_text.lower() and ("name" in query_text.lower() or "my name" in query_text.lower()):
-                    if user_name:
-                        response_text = f"Your name is {user_name}."
-                    else:
-                        response_text = "I don't have your name stored yet. You can tell me by saying 'My name is [your name]' and I'll remember it for next time."
-                else:
-                    # Generate normal AI response using OpenAI
-                    response_text = generate_normal_ai_response(query_text, user_name)
+                # Generate fluid conversational response
+                response_text = generate_conversational_response(user_id, query_text, personal_info)
                 
                 results = [
                     {
-                        "chunk_id": "ai_response",
+                        "chunk_id": "conversational_response",
                         "text": response_text,
-                        "doc_title": "AI Response", 
-                        "section": "generated",
-                        "tags": ["ai", "personal"] if personal_info else ["ai", "general"],
-                        "source_path": "system/ai",
-                        "score": 0.8
+                        "doc_title": "Conversational AI", 
+                        "section": "conversation",
+                        "tags": ["conversation", "personal", "ai"],
+                        "source_path": "system/conversation",
+                        "score": 0.9
                     }
                 ]
             
@@ -367,14 +455,14 @@ def rag_query_sync(request: dict):
                 }
             ]
         
-        # Store AI response for future memory/context (disabled for now to prevent errors)
-        # try:
-        #     if results and len(results) > 0:
-        #         ai_response_text = results[0].get("text", "")
-        #         if ai_response_text:
-        #             asyncio.run(store_user_interaction(user_id, ai_response_text, "assistant"))
-        # except Exception as store_error:
-        #     print(f"Warning: Could not store AI response: {store_error}")
+        # Store conversation turn for context (safe in-memory storage)
+        if results and len(results) > 0:
+            ai_response_text = results[0].get("text", "")
+            if ai_response_text:
+                try:
+                    store_conversation_turn(user_id, query_text, ai_response_text)
+                except Exception as store_error:
+                    print(f"Warning: Could not store conversation turn: {store_error}")
         
         return {
             "results": results,
