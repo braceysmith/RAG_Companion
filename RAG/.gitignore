@@ -74,4 +74,9 @@ logs/
 .DS_Store
 
 # Windows
-Thumbs.db
+Thumbs.db# Unity temp files and backups
+**/Temp/
+**/Library/
+**/__Backupscenes/
+*.backup
+.env

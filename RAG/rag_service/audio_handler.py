@@ -36,7 +36,7 @@ class AudioHandler:
     
     def __init__(self):
         self.openai_api_key = os.getenv("OPENAI_API_KEY")
-        self.realtime_url = "wss://api.openai.com/v1/realtime?model=gpt-4o-mini-realtime-preview-2024-12-17"
+        self.realtime_url = "wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-10-01"
         
     async def speech_to_text(self, audio_data: bytes, audio_format: str = "webm") -> str:
         """Convert speech to text using OpenAI Whisper API"""
@@ -75,14 +75,12 @@ class AudioHandler:
             logger.error(f"Text-to-speech error: {e}")
             raise
     
-    async def create_realtime_session(self, session_config: Dict[str, Any]) -> Dict[str, Any]:
-        """Create a real-time audio session configuration"""
-        default_config = {
-            "type": "session.update",
-            "session": {
-                "modalities": ["text", "audio"],
-                "instructions": """You are a conversational AI companion that remembers personal details and maintains fluid conversation. 
-                
+    async def create_realtime_session(self, session_config: Dict[str, Any], user_profile: Dict[str, Any] = None) -> Dict[str, Any]:
+        """Create a real-time audio session configuration following official OpenAI format"""
+        
+        # Build instructions with user context
+        instructions = """You are a conversational AI companion that remembers personal details and maintains fluid conversation. 
+
 Key behaviors:
 - Naturally incorporate what you know about the user into responses
 - Reference previous conversation topics when relevant  
@@ -90,7 +88,34 @@ Key behaviors:
 - Be genuinely interested in their life, work, and interests
 - Make connections between different pieces of information they've shared
 - Respond in a warm, engaging, and personal way
-- When you have tool results, incorporate them naturally into the conversation""",
+- When you have tool results, incorporate them naturally into the conversation"""
+
+        # Add user context if available
+        if user_profile:
+            profile_context = "\n\nWhat you know about this user:\n"
+            for key, value in user_profile.items():
+                profile_context += f"- {key.title()}: {value}\n"
+            instructions += profile_context
+
+        # Import tool manager to get available tools
+        from mcp_tools import tool_manager
+        available_tools = tool_manager.get_available_tools()
+        
+        # Convert tools to OpenAI Realtime API format
+        tools = []
+        for tool in available_tools:
+            tools.append({
+                "type": "function",
+                "name": tool["name"],
+                "description": tool["description"],
+                "parameters": tool["parameters"]
+            })
+
+        default_config = {
+            "type": "session.update",
+            "session": {
+                "modalities": ["text", "audio"],
+                "instructions": instructions,
                 "voice": session_config.get("voice", "alloy"),
                 "input_audio_format": "pcm16",
                 "output_audio_format": "pcm16",
@@ -103,7 +128,7 @@ Key behaviors:
                     "prefix_padding_ms": 300,
                     "silence_duration_ms": 200
                 },
-                "tools": [],  # Will be populated with available tools
+                "tools": tools,
                 "tool_choice": "auto",
                 "temperature": 0.8,
                 "max_response_output_tokens": "inf"
@@ -117,9 +142,9 @@ Key behaviors:
         return default_config
     
     async def handle_realtime_websocket(self, websocket_connection, user_id: str, user_profile: Dict[str, Any] = None):
-        """Handle real-time WebSocket communication with OpenAI Realtime API"""
+        """Handle real-time WebSocket communication with OpenAI Realtime API following official patterns"""
         try:
-            # Connect to OpenAI Realtime API
+            # Connect to OpenAI Realtime API with official headers
             headers = {
                 "Authorization": f"Bearer {self.openai_api_key}",
                 "OpenAI-Beta": "realtime=v1"
@@ -128,17 +153,55 @@ Key behaviors:
             async with websockets.connect(self.realtime_url, extra_headers=headers) as openai_ws:
                 logger.info("Connected to OpenAI Realtime API")
                 
-                # Create session configuration
+                # Create session configuration with user context
                 session_config = await self.create_realtime_session({
-                    "voice": "alloy",
-                    "instructions": f"""You are a conversational AI companion for user {user_id}. 
-                    What you know about this user: {json.dumps(user_profile or {})}
-                    
-                    Be warm, personal, and remember details they share with you."""
-                })
+                    "voice": "alloy"
+                }, user_profile)
                 
                 # Send session configuration
                 await openai_ws.send(json.dumps(session_config))
+                logger.info("Session configuration sent")
+                
+                # Handle tool calls
+                async def handle_tool_call(tool_call_data):
+                    """Handle tool calls from OpenAI"""
+                    try:
+                        call_id = tool_call_data.get("call_id")
+                        function_name = tool_call_data.get("name")
+                        arguments = json.loads(tool_call_data.get("arguments", "{}"))
+                        
+                        logger.info(f"Tool call: {function_name} with args: {arguments}")
+                        
+                        # Execute tool using our tool manager
+                        from mcp_tools import tool_manager
+                        result = await tool_manager.execute_tool(function_name, **arguments)
+                        
+                        # Send tool result back to OpenAI
+                        tool_response = {
+                            "type": "conversation.item.create",
+                            "item": {
+                                "type": "function_call_output",
+                                "call_id": call_id,
+                                "output": json.dumps(result)
+                            }
+                        }
+                        await openai_ws.send(json.dumps(tool_response))
+                        
+                        # Trigger response generation
+                        await openai_ws.send(json.dumps({"type": "response.create"}))
+                        
+                    except Exception as e:
+                        logger.error(f"Tool call error: {e}")
+                        # Send error response
+                        error_response = {
+                            "type": "conversation.item.create",
+                            "item": {
+                                "type": "function_call_output", 
+                                "call_id": call_id,
+                                "output": json.dumps({"error": str(e)})
+                            }
+                        }
+                        await openai_ws.send(json.dumps(error_response))
                 
                 # Create bidirectional message routing
                 async def forward_to_openai():
@@ -147,10 +210,11 @@ Key behaviors:
                         async for message in websocket_connection:
                             if isinstance(message, str):
                                 data = json.loads(message)
-                                logger.info(f"Client -> OpenAI: {data.get('type', 'unknown')}")
+                                event_type = data.get('type', 'unknown')
+                                logger.info(f"Client -> OpenAI: {event_type}")
                                 await openai_ws.send(message)
                             elif isinstance(message, bytes):
-                                # Handle binary audio data
+                                # Handle binary audio data - convert to official format
                                 audio_event = {
                                     "type": "input_audio_buffer.append",
                                     "audio": base64.b64encode(message).decode()
@@ -162,21 +226,35 @@ Key behaviors:
                         logger.error(f"Error forwarding to OpenAI: {e}")
                 
                 async def forward_to_client():
-                    """Forward messages from OpenAI to client"""
+                    """Forward messages from OpenAI to client with event handling"""
                     try:
                         async for message in openai_ws:
                             data = json.loads(message)
                             event_type = data.get("type", "unknown")
                             logger.info(f"OpenAI -> Client: {event_type}")
                             
-                            # Handle different event types
+                            # Handle different event types per official documentation
                             if event_type == "response.audio.delta":
                                 # Send audio data to client
                                 audio_data = base64.b64decode(data.get("delta", ""))
                                 await websocket_connection.send(audio_data)
-                            else:
-                                # Send JSON events to client
+                            elif event_type == "response.function_call_arguments.delta":
+                                # Handle streaming tool call arguments
                                 await websocket_connection.send(message)
+                            elif event_type == "response.function_call_arguments.done":
+                                # Execute completed tool call
+                                await handle_tool_call(data)
+                            elif event_type in ["session.created", "session.updated", "conversation.created"]:
+                                # Send session events to client
+                                await websocket_connection.send(message)
+                            elif event_type == "error":
+                                # Forward errors to client
+                                logger.error(f"OpenAI API error: {data}")
+                                await websocket_connection.send(message)
+                            else:
+                                # Send all other events to client
+                                await websocket_connection.send(message)
+                                
                     except websockets.exceptions.ConnectionClosed:
                         logger.info("OpenAI connection closed")
                     except Exception as e:
