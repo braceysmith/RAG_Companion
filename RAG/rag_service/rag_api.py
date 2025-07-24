@@ -14,6 +14,7 @@ from database import RAGDatabase
 from chunker import DocumentChunker, DocumentProcessor
 from mcp_tools import tool_manager
 from audio_handler import audio_handler
+from hybrid_rag_system import get_hybrid_rag, process_voice_query
 
 # Load environment variables
 load_dotenv()
@@ -277,6 +278,25 @@ async def process_audio_endpoint(
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Audio processing failed: {str(e)}")
+
+@app.post("/mobile/voice", response_model=dict)
+async def mobile_voice_endpoint(
+    audio: UploadFile = File(...),
+    user_id: str = "anonymous",
+    audio_format: str = "webm"
+):
+    """Mobile voice processing with hybrid RAG (local + cloud)"""
+    try:
+        # Read audio file
+        audio_data = await audio.read()
+        
+        # Process with hybrid RAG system
+        result = await process_voice_query(audio_data, user_id, audio_format)
+        
+        return result
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Mobile voice processing failed: {str(e)}")
 
 def extract_personal_info(message: str) -> dict:
     """Extract personal information from user messages"""
