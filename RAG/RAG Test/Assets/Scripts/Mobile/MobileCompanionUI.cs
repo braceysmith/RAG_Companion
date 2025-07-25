@@ -63,6 +63,9 @@ public class MobileCompanionUI : MonoBehaviour
     private bool isRecording = false;
     private bool isProcessing = false;
     private bool isPlayingAudio = false;
+    private bool pendingVoiceInputStart = false; // Track if user wants to start voice input
+    private Coroutine connectionTimeoutCoroutine; // Track connection timeout
+    private bool isInterrupting = false; // Track if we're in interruption mode
     
     // Component references
     private MobileRAGCompanionSystem companionSystem;
@@ -637,16 +640,27 @@ public class MobileCompanionUI : MonoBehaviour
     
     private void OnDestroy()
     {
-        // Remove event handlers
-        if (audioManager != null)
+        LogMessage("OnDestroy called - cleaning up event handlers");
+        
+        try
         {
-            audioManager.OnRecordingStarted -= OnRecordingStarted;
-            audioManager.OnRecordingStopped -= OnRecordingStopped;
-            audioManager.OnVoiceDetected -= OnVoiceDetected;
-            audioManager.OnVoiceEnded -= OnVoiceEnded;
-            audioManager.OnAudioPlaybackCompleted -= OnAudioPlaybackCompleted;
-            audioManager.OnError -= OnAudioError;
-        }
+            // Cancel any pending connection timeout
+            if (connectionTimeoutCoroutine != null)
+            {
+                StopCoroutine(connectionTimeoutCoroutine);
+                connectionTimeoutCoroutine = null;
+            }
+            
+            // Remove event handlers
+            if (audioManager != null)
+            {
+                audioManager.OnRecordingStarted -= OnRecordingStarted;
+                audioManager.OnRecordingStopped -= OnRecordingStopped;
+                audioManager.OnVoiceDetected -= OnVoiceDetected;
+                audioManager.OnVoiceEnded -= OnVoiceEnded;
+                audioManager.OnAudioPlaybackCompleted -= OnAudioPlaybackCompleted;
+                audioManager.OnError -= OnAudioError;
+            }
         
         if (companionSystem != null)
         {
@@ -681,54 +695,86 @@ public class MobileCompanionUI : MonoBehaviour
             voiceRecordButton.onClick.RemoveListener(OnVoiceButtonClicked);
         }
         
-        LogMessage("Mobile Companion UI destroyed");
+            LogMessage("Mobile Companion UI destroyed successfully");
+        }
+        catch (System.Exception ex)
+        {
+            Debug.LogError($"Error during UI cleanup: {ex.Message}");
+        }
     }
     
     // Voice Control Methods
     private void OnVoiceButtonClicked()
     {
-        LogMessage($"Voice button clicked - Current state: {currentState}");
+        LogMessage($"Voice button clicked - Current state: {currentState}, pendingVoiceInputStart: {pendingVoiceInputStart}, realtimeChat.IsConnected: {(realtimeChat?.IsConnected ?? false)}");
         
-        switch (currentState) 
+        try
         {
-            case ConversationState.Idle:
-                StartVoiceRecording();
-                break;
-                
-            case ConversationState.Listening:
-                StopVoiceRecording();
-                break;
-                
-            case ConversationState.PlayingAudio:
-                StopAudioPlayback();
-                break;
-                
-            default:
-                LogMessage($"Voice button disabled in state: {currentState}");
-                break;
+            switch (currentState) 
+            {
+                case ConversationState.Idle:
+                    StartVoiceRecording();
+                    break;
+                    
+                case ConversationState.Listening:
+                    StopVoiceRecording();
+                    break;
+                    
+                case ConversationState.Processing:
+                case ConversationState.Responding:
+                case ConversationState.PlayingAudio:
+                    // Allow interruption of AI during any response phase
+                    InterruptAIAndStartListening();
+                    break;
+                    
+                default:
+                    LogMessage($"Voice button disabled in state: {currentState}");
+                    break;
+            }
+        }
+        catch (System.Exception ex)
+        {
+            LogError($"Error in voice button click handler: {ex.Message}\nStackTrace: {ex.StackTrace}");
+            ShowError($"Voice button error: {ex.Message}");
+            SetState(ConversationState.Idle);
         }
     }
     
     private void StartVoiceRecording()
     {
+        LogMessage("StartVoiceRecording called");
+        
         // Prefer WebRTC realtime chat for voice input
         if (realtimeChat != null && realtimeChat.IsConnected)
         {
+            LogMessage("Realtime chat connected - starting voice input immediately");
             realtimeChat.StartVoiceInput();
             SetState(ConversationState.Listening);
+            pendingVoiceInputStart = false;
         }
         else if (realtimeChat != null && !realtimeChat.IsConnected)
         {
-            // Start realtime session first
+            LogMessage("Realtime chat not connected - starting session first");
+            // Mark that user wants to start voice input after connection
+            pendingVoiceInputStart = true;
             realtimeChat.StartRealtimeSession();
             SetState(ConversationState.Processing);
             UpdateStatusText("Connecting to voice chat...");
+            
+            // Start connection timeout
+            if (connectionTimeoutCoroutine != null)
+            {
+                StopCoroutine(connectionTimeoutCoroutine);
+            }
+            connectionTimeoutCoroutine = StartCoroutine(ConnectionTimeoutCoroutine());
         }
         else if (companionSystem != null)
         {
+            LogMessage("Using companion system fallback");
             // Fallback to companion system
             companionSystem.StartVoiceRecording();
             SetState(ConversationState.Listening);
+            pendingVoiceInputStart = false;
         }
         else
         {
@@ -738,17 +784,97 @@ public class MobileCompanionUI : MonoBehaviour
     
     private void StopVoiceRecording()
     {
-        // Prefer WebRTC realtime chat
-        if (realtimeChat != null && realtimeChat.IsTalking)
+        LogMessage("StopVoiceRecording called");
+        
+        try
         {
-            realtimeChat.StopVoiceInput();
-            SetState(ConversationState.Processing);
+            // Prefer WebRTC realtime chat
+            if (realtimeChat != null && realtimeChat.IsTalking)
+            {
+                LogMessage("Stopping realtime chat voice input");
+                realtimeChat.StopVoiceInput();
+                SetState(ConversationState.Processing);
+            }
+            else if (companionSystem != null)
+            {
+                LogMessage("Using companion system fallback to stop recording");
+                // Fallback to companion system
+                companionSystem.StopVoiceRecording();
+                SetState(ConversationState.Processing);
+            }
+            else
+            {
+                LogMessage("No voice system available to stop");
+                SetState(ConversationState.Idle);
+            }
         }
-        else if (companionSystem != null)
+        catch (System.Exception ex)
         {
-            // Fallback to companion system
-            companionSystem.StopVoiceRecording();
-            SetState(ConversationState.Processing);
+            LogError($"Error stopping voice recording: {ex.Message}");
+            ShowError($"Error stopping voice recording: {ex.Message}");
+            SetState(ConversationState.Idle);
+        }
+    }
+    
+    private void InterruptAIAndStartListening()
+    {
+        LogMessage($"=== INTERRUPTION STARTED === Current state: {currentState}");
+        
+        // Set interruption flag to prevent unwanted state changes
+        isInterrupting = true;
+        
+        try
+        {
+            // Stop any ongoing AI activity
+            if (realtimeChat != null)
+            {
+                LogMessage($"Sending interruption to realtime chat - IsConnected: {realtimeChat.IsConnected}, IsAIResponding: {realtimeChat.IsAIResponding}");
+                realtimeChat.InterruptAIResponse();
+            }
+            else
+            {
+                LogError("RealtimeChat is null - cannot interrupt");
+            }
+            
+            // Stop audio playback if playing
+            if (audioManager != null)
+            {
+                LogMessage("Stopping audio manager playback");
+                audioManager.StopPlayback();
+            }
+            
+            // Reset UI indicators immediately
+            LogMessage("Resetting UI indicators");
+            ShowProcessingIndicator(false);
+            ShowAudioPlaybackIndicator(false);
+            
+            // Start listening immediately - this should NOT go to Processing state
+            LogMessage($"Starting voice input after interruption - realtimeChat != null: {realtimeChat != null}, IsConnected: {realtimeChat?.IsConnected ?? false}");
+            if (realtimeChat != null && realtimeChat.IsConnected)
+            {
+                LogMessage("Calling StartVoiceInput() directly for interruption");
+                realtimeChat.StartVoiceInput();
+                LogMessage("Setting state to Listening immediately");
+                SetState(ConversationState.Listening);
+                LogMessage("=== INTERRUPTION COMPLETE - NOW LISTENING ===");
+            }
+            else
+            {
+                LogError($"Cannot interrupt - voice chat not ready. realtimeChat: {realtimeChat != null}, IsConnected: {realtimeChat?.IsConnected ?? false}");
+                ShowError("Cannot interrupt - voice chat not connected");
+                SetState(ConversationState.Idle);
+            }
+        }
+        catch (System.Exception ex)
+        {
+            LogError($"Error interrupting AI: {ex.Message}\nStackTrace: {ex.StackTrace}");
+            ShowError($"Error interrupting AI: {ex.Message}");
+            SetState(ConversationState.Idle);
+        }
+        finally
+        {
+            // Clear interruption flag
+            isInterrupting = false;
         }
     }
     
@@ -767,7 +893,11 @@ public class MobileCompanionUI : MonoBehaviour
         ConversationState previousState = currentState;
         currentState = newState;
         
-        LogMessage($"State changed: {previousState} → {newState}");
+        // Get stack trace to see what's calling this
+        var stackTrace = System.Environment.StackTrace;
+        var callerInfo = stackTrace.Split('\n')[1].Trim(); // Get the immediate caller
+        
+        LogMessage($"State changed: {previousState} → {newState} | Called by: {callerInfo}");
         
         UpdateUIForState(newState);
     }
@@ -789,33 +919,33 @@ public class MobileCompanionUI : MonoBehaviour
                 break;
                 
             case ConversationState.Listening:
-                UpdateStatusText("Listening... Tap to stop");
-                UpdateVoiceButtonText("STOP");
+                UpdateStatusText("Listening... Speak now");
+                UpdateVoiceButtonText("LISTENING");
                 SetVoiceButtonColor(recordingButtonColor);
                 SetVoiceButtonEnabled(true);
                 ShowRecordingIndicator(true);
                 break;
                 
             case ConversationState.Processing:
-                UpdateStatusText("Processing voice...");
-                UpdateVoiceButtonText("PROCESSING");
+                UpdateStatusText("Processing voice... Tap to interrupt");
+                UpdateVoiceButtonText("INTERRUPT");
                 SetVoiceButtonColor(processingButtonColor);
-                SetVoiceButtonEnabled(false);
+                SetVoiceButtonEnabled(true); // Allow interruption
                 ShowProcessingIndicator(true);
                 break;
                 
             case ConversationState.Responding:
-                UpdateStatusText("AI is thinking...");
-                UpdateVoiceButtonText("THINKING");
+                UpdateStatusText("AI is thinking... Tap to interrupt");
+                UpdateVoiceButtonText("INTERRUPT");
                 SetVoiceButtonColor(processingButtonColor);
-                SetVoiceButtonEnabled(false);
+                SetVoiceButtonEnabled(true); // Allow interruption
                 ShowProcessingIndicator(true);
                 break;
                 
             case ConversationState.PlayingAudio:
-                UpdateStatusText("AI is speaking... Tap to stop");
-                UpdateVoiceButtonText("STOP AUDIO");
-                SetVoiceButtonColor(defaultButtonColor);
+                UpdateStatusText("AI is speaking... Tap to interrupt");
+                UpdateVoiceButtonText("INTERRUPT");
+                SetVoiceButtonColor(Color.red); // Red for interruption
                 SetVoiceButtonEnabled(true);
                 ShowAudioPlaybackIndicator(true);
                 break;
@@ -830,7 +960,7 @@ public class MobileCompanionUI : MonoBehaviour
     }
     
     // UI Update Methods
-    private void UpdateStatusText(string text)
+    public void UpdateStatusText(string text)
     {
         if (statusText != null)
         {
@@ -1049,13 +1179,34 @@ public class MobileCompanionUI : MonoBehaviour
     // Realtime Chat Event Handlers
     private void OnRealtimeConnected()
     {
-        LogMessage("Realtime chat connected");
-        UpdateStatusText("Voice chat ready - Tap to talk");
-        SetVoiceButtonEnabled(true);
+        LogMessage($"Realtime chat connected - pendingVoiceInputStart: {pendingVoiceInputStart}, currentState: {currentState}");
         
-        if (currentState == ConversationState.Processing)
+        // Cancel connection timeout
+        if (connectionTimeoutCoroutine != null)
         {
-            SetState(ConversationState.Idle);
+            StopCoroutine(connectionTimeoutCoroutine);
+            connectionTimeoutCoroutine = null;
+        }
+        
+        // If user was waiting for connection to start voice input, do it now
+        if (pendingVoiceInputStart && currentState == ConversationState.Processing)
+        {
+            LogMessage("Connection established - starting pending voice input after delay");
+            pendingVoiceInputStart = false;
+            
+            // Wait a moment for session configuration to complete, then start voice input
+            StartCoroutine(StartVoiceInputAfterDelay());
+        }
+        else
+        {
+            // Normal connection without pending voice input
+            UpdateStatusText("Voice chat ready - Tap to talk");
+            SetVoiceButtonEnabled(true);
+            
+            if (currentState == ConversationState.Processing)
+            {
+                SetState(ConversationState.Idle);
+            }
         }
     }
     
@@ -1099,6 +1250,71 @@ public class MobileCompanionUI : MonoBehaviour
     {
         LogError($"Realtime chat error: {error}");
         ShowError($"Voice chat error: {error}");
+        
+        // Reset pending voice input on error
+        if (pendingVoiceInputStart)
+        {
+            pendingVoiceInputStart = false;
+            if (connectionTimeoutCoroutine != null)
+            {
+                StopCoroutine(connectionTimeoutCoroutine);
+                connectionTimeoutCoroutine = null;
+            }
+        }
+    }
+    
+    // Connection timeout handling
+    private IEnumerator ConnectionTimeoutCoroutine()
+    {
+        yield return new WaitForSeconds(10f); // 10 second timeout
+        
+        if (pendingVoiceInputStart && currentState == ConversationState.Processing)
+        {
+            LogError("Connection timeout - resetting to idle state");
+            pendingVoiceInputStart = false;
+            connectionTimeoutCoroutine = null;
+            
+            ShowError("Connection timeout. Please try again.");
+            SetState(ConversationState.Idle);
+        }
+    }
+    
+    private IEnumerator StartVoiceInputAfterDelay()
+    {
+        LogMessage("Waiting for session configuration to complete...");
+        yield return new WaitForSeconds(0.5f); // Wait 500ms for session config
+        
+        if (realtimeChat != null && realtimeChat.IsConnected)
+        {
+            LogMessage("Starting voice input after connection delay");
+            realtimeChat.StartVoiceInput();
+            SetState(ConversationState.Listening);
+        }
+        else
+        {
+            LogError("Realtime chat not ready after delay");
+            ShowError("Voice chat not ready. Please try again.");
+            SetState(ConversationState.Idle);
+        }
+    }
+    
+    // Public methods for external state management
+    public void ResetToIdleState()
+    {
+        LogMessage("Resetting UI to idle state for next conversation turn");
+        SetState(ConversationState.Idle);
+    }
+    
+    public void SetToPlayingAudioState()
+    {
+        LogMessage("Setting UI to PlayingAudio state - INTERRUPT button should be visible");
+        SetState(ConversationState.PlayingAudio);
+    }
+    
+    public void SetToRespondingState()
+    {
+        LogMessage("Setting UI to Responding state - INTERRUPT button should be visible");
+        SetState(ConversationState.Responding);
     }
     
     // Public getters

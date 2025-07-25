@@ -2,6 +2,7 @@ using System;
 using System.Text;
 using System.Collections;
 using System.Collections.Generic;
+using System.Linq;
 using UnityEngine;
 using UnityEngine.Networking;
 using Unity.WebRTC;
@@ -20,7 +21,7 @@ public class MobileRealtimeChat : MonoBehaviour
     [Header("RAG Integration")]
     [SerializeField] private string ragApiUrl = "https://your-rag-api.up.railway.app";
     [SerializeField] private string userId = "mobile-user";
-    [SerializeField] private bool enableRAGContext = false; // Temporarily disabled
+    [SerializeField] private bool enableRAGContext = true; // Now enabled for conversation memory
     [SerializeField] private int maxRAGResults = 3;
     
     // WebRTC Components
@@ -49,6 +50,11 @@ public class MobileRealtimeChat : MonoBehaviour
     // Audio transcript tracking
     private StringBuilder currentTranscript = new StringBuilder();
     
+    // Audio streaming
+    private Coroutine audioStreamingCoroutine;
+    private AudioClip microphoneClip;
+    private int lastMicrophonePosition = 0;
+    
     // Events
     public event Action OnConnectionEstablished;
     public event Action OnConnectionLost;
@@ -58,6 +64,12 @@ public class MobileRealtimeChat : MonoBehaviour
     
     private void Start()
     {
+        // Initialize Unity audio settings for better WebRTC compatibility
+        AudioConfiguration audioConfig = AudioSettings.GetConfiguration();
+        audioConfig.sampleRate = 24000; // Common rate for voice
+        audioConfig.numRealVoices = 32;
+        AudioSettings.Reset(audioConfig);
+        
         InitializeMobileRealtime();
     }
     
@@ -68,14 +80,54 @@ public class MobileRealtimeChat : MonoBehaviour
         ragClient = GetComponent<MobileRAGClient>() ?? FindFirstObjectByType<MobileRAGClient>();
         ragConfig = RAGConfiguration.Instance;
         
+        // Debug RAG configuration
+        LogMessage($"RAG Client initialized: {ragClient != null}");
+        LogMessage($"RAG Config initialized: {ragConfig != null}");
+        LogMessage($"RAG Context enabled: {enableRAGContext}");
+        LogMessage($"RAG API URL: {ragApiUrl}");
+        LogMessage($"User ID: {userId}");
+        
+        if (enableRAGContext && ragClient == null)
+        {
+            LogError("RAG context is enabled but no MobileRAGClient found! Memory will not work.");
+        }
+        
+        // Check RAG API URL configuration
+        if (enableRAGContext && ragClient != null)
+        {
+            // Try to sync the API URLs
+            var ragClientApiUrl = ragClient.GetType().GetField("cloudApiUrl", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            if (ragClientApiUrl != null)
+            {
+                string currentUrl = ragClientApiUrl.GetValue(ragClient) as string;
+                LogMessage($"RAG Client API URL: {currentUrl}");
+                
+                if (currentUrl == "https://your-rag-api.com" || string.IsNullOrEmpty(currentUrl))
+                {
+                    LogError("RAG Client API URL is not configured! Set it to your Railway server URL in the inspector.");
+                }
+                else if (currentUrl != ragApiUrl)
+                {
+                    LogMessage($"RAG Client URL ({currentUrl}) differs from realtime URL ({ragApiUrl}). This might cause issues.");
+                }
+            }
+        }
+        
         // Setup audio source for remote audio
         remoteAudioSource = gameObject.GetComponent<AudioSource>();
         if (remoteAudioSource == null)
         {
             remoteAudioSource = gameObject.AddComponent<AudioSource>();
         }
+        
+        // Configure audio source for WebRTC remote audio
         remoteAudioSource.playOnAwake = false;
-        remoteAudioSource.loop = true;
+        remoteAudioSource.loop = false;
+        remoteAudioSource.volume = 1.0f;
+        remoteAudioSource.spatialBlend = 0f; // 2D audio
+        remoteAudioSource.priority = 128;
+        
+        LogMessage("Remote audio source configured for WebRTC output");
         
         // Subscribe to UI events
         if (companionUI != null)
@@ -83,7 +135,7 @@ public class MobileRealtimeChat : MonoBehaviour
             // The UI will call our public methods directly
         }
         
-        LogMessage("Mobile Realtime Chat initialized");
+        LogMessage($"Mobile Realtime Chat initialized - RAG ready: {enableRAGContext && ragClient != null}");
     }
     
     // Public methods for UI integration
@@ -108,8 +160,11 @@ public class MobileRealtimeChat : MonoBehaviour
     
     public void StartVoiceInput()
     {
+        LogMessage($"StartVoiceInput called - isConnectionActive: {isConnectionActive}, isTalking: {isTalking}, localMicTrack != null: {localMicTrack != null}");
+        
         if (!isConnectionActive)
         {
+            LogError("Cannot start voice input - not connected to realtime session");
             OnError?.Invoke("Not connected to realtime session");
             return;
         }
@@ -120,48 +175,76 @@ public class MobileRealtimeChat : MonoBehaviour
             return;
         }
         
-        // Enable microphone
-        if (localMicTrack != null)
+        // Enable microphone for continuous listening
+        if (localMicTrack != null && microphoneClip != null)
         {
-            localMicTrack.Enabled = true;
+            LogMessage($"Starting audio streaming to OpenAI");
             isTalking = true;
             currentTranscript.Clear();
+            lastMicrophonePosition = Microphone.GetPosition(null);
             
-            LogMessage("Voice input started");
+            // Start streaming audio data to OpenAI
+            if (audioStreamingCoroutine != null)
+            {
+                StopCoroutine(audioStreamingCoroutine);
+            }
+            audioStreamingCoroutine = StartCoroutine(StreamAudioToOpenAI());
+            
+            LogMessage($"Voice input started successfully - Audio streaming started");
+            
+            // Clear any previous audio buffer (just in case)
+            SendClearAudioBuffer();
             
             // Update UI state
             if (companionUI != null)
             {
                 companionUI.ShowRecordingIndicator(true);
+                companionUI.UpdateStatusText("Listening... Speak now");
             }
         }
         else
         {
+            LogError("Cannot start voice input - microphone not initialized");
             OnError?.Invoke("Microphone not initialized");
         }
     }
     
     public void StopVoiceInput()
     {
+        LogMessage($"StopVoiceInput called - isTalking: {isTalking}");
+        
         if (!isTalking)
         {
+            LogMessage("Voice input was not active, nothing to stop");
             return;
         }
         
-        // Disable microphone
-        if (localMicTrack != null)
+        try
         {
-            localMicTrack.Enabled = false;
-            isTalking = false;
+            // Stop audio streaming
+            if (audioStreamingCoroutine != null)
+            {
+                LogMessage($"Stopping audio streaming coroutine");
+                StopCoroutine(audioStreamingCoroutine);
+                audioStreamingCoroutine = null;
+            }
             
-            LogMessage("Voice input stopped");
+            isTalking = false;
+            LogMessage($"Voice input stopped successfully - waiting for server VAD to detect end");
             
             // Update UI state
             if (companionUI != null)
             {
                 companionUI.ShowRecordingIndicator(false);
                 companionUI.ShowProcessingIndicator(true);
+                companionUI.UpdateStatusText("Processing speech...");
             }
+        }
+        catch (System.Exception ex)
+        {
+            LogError($"Error stopping voice input: {ex.Message}");
+            isTalking = false;
+            OnError?.Invoke($"Error stopping voice input: {ex.Message}");
         }
     }
     
@@ -174,6 +257,56 @@ public class MobileRealtimeChat : MonoBehaviour
         }
         
         StartCoroutine(SendTextMessageWithRAGContext(message));
+    }
+    
+    public void InterruptAIResponse()
+    {
+        LogMessage($"=== INTERRUPTING AI RESPONSE === isConnectionActive: {isConnectionActive}, isAIResponding: {isAIResponding}");
+        
+        if (!isConnectionActive)
+        {
+            LogError("Cannot interrupt - not connected to realtime session");
+            return;
+        }
+        
+        try
+        {
+            // Cancel any ongoing response
+            if (isAIResponding)
+            {
+                LogMessage("Sending response cancel to OpenAI");
+                SendResponseCancel();
+                isAIResponding = false;
+                LogMessage("AI response canceled successfully");
+            }
+            else
+            {
+                LogMessage("No active AI response to cancel");
+            }
+            
+            // Stop remote audio if playing
+            if (remoteAudioSource != null && remoteAudioSource.isPlaying)
+            {
+                LogMessage("Stopping remote audio playback");
+                remoteAudioSource.Stop();
+                LogMessage("Remote audio playback stopped");
+            }
+            else
+            {
+                LogMessage($"Remote audio not playing - isPlaying: {remoteAudioSource?.isPlaying ?? false}");
+            }
+            
+            // Clear any pending audio buffer
+            LogMessage("Clearing audio buffer for interruption");
+            SendClearAudioBuffer();
+            
+            LogMessage("=== AI RESPONSE INTERRUPTION COMPLETE ===");
+            
+        }
+        catch (System.Exception ex)
+        {
+            LogError($"Error interrupting AI response: {ex.Message}\nStackTrace: {ex.StackTrace}");
+        }
     }
     
     public void StopRealtimeSession()
@@ -287,10 +420,23 @@ public class MobileRealtimeChat : MonoBehaviour
     {
         peerConnection.OnTrack = (RTCTrackEvent e) =>
         {
-            if (e.Track is AudioStreamTrack track)
+            LogMessage($"Track received: {e.Track.Kind}");
+            
+            if (e.Track is AudioStreamTrack audioTrack)
             {
-                remoteAudioSource.SetTrack(track);
-                LogMessage("Remote audio track connected");
+                LogMessage("Setting up remote audio track");
+                
+                // Set the audio track to the remote audio source
+                remoteAudioSource.SetTrack(audioTrack);
+                remoteAudioSource.Play();
+                
+                LogMessage("Remote audio track connected and playing");
+                
+                // Update UI to show audio is playing
+                if (companionUI != null)
+                {
+                    companionUI.ShowAudioPlaybackIndicator(true);
+                }
             }
         };
         
@@ -302,10 +448,10 @@ public class MobileRealtimeChat : MonoBehaviour
             {
                 case RTCIceConnectionState.Connected:
                 case RTCIceConnectionState.Completed:
-                    isConnectionActive = true;
+                    // ICE connection established, but wait for data channel to open
                     lastResponseTime = Time.time;
                     reconnectAttempts = 0;
-                    OnConnectionEstablished?.Invoke();
+                    LogMessage("ICE connection established - waiting for data channel");
                     break;
                     
                 case RTCIceConnectionState.Failed:
@@ -327,14 +473,15 @@ public class MobileRealtimeChat : MonoBehaviour
     {
         dataChannel.OnOpen = () =>
         {
-            LogMessage("Data channel opened");
+            LogMessage("Data channel opened - WebRTC connection fully established");
             isConnectionActive = true;
             
-            // Update UI
-            if (companionUI != null)
-            {
-                companionUI.ShowProcessingIndicator(false);
-            }
+            // Send session configuration
+            SendSessionConfiguration();
+            
+            LogMessage("Invoking OnConnectionEstablished event");
+            // Notify connection established
+            OnConnectionEstablished?.Invoke();
         };
         
         dataChannel.OnMessage = (byte[] data) =>
@@ -380,9 +527,11 @@ public class MobileRealtimeChat : MonoBehaviour
             yield break;
         }
         
-        // Start microphone
-        int sampleRate = AudioSettings.outputSampleRate;
-        AudioClip micClip = Microphone.Start(null, true, 10, sampleRate);
+        // Start microphone with standard voice sample rate
+        int sampleRate = 24000; // Standard rate for voice (24kHz)
+        microphoneClip = Microphone.Start(null, true, 10, sampleRate);
+        
+        LogMessage($"Started microphone - Sample rate: {sampleRate}, Device: {(Microphone.devices.Length > 0 ? Microphone.devices[0] : "default")}");
         
         // Wait for microphone to start
         while (Microphone.GetPosition(null) <= 0)
@@ -397,15 +546,18 @@ public class MobileRealtimeChat : MonoBehaviour
             localAudioSource = gameObject.AddComponent<AudioSource>();
         }
         
-        localAudioSource.clip = micClip;
+        localAudioSource.clip = microphoneClip;
         localAudioSource.loop = true;
         localAudioSource.mute = true; // Mute local playback
         localAudioSource.Play();
         
-        // Create WebRTC audio track (disabled by default)
+        // Create WebRTC audio track (enabled initially for testing)
         localMicTrack = new AudioStreamTrack(localAudioSource);
-        localMicTrack.Enabled = false;
-        peerConnection.AddTrack(localMicTrack);
+        localMicTrack.Enabled = false; // Start disabled
+        
+        // Add track to peer connection
+        var sender = peerConnection.AddTrack(localMicTrack);
+        LogMessage($"Added microphone track to peer connection - Track enabled: {localMicTrack.Enabled}");
         
         LogMessage("Microphone initialized successfully");
     }
@@ -484,10 +636,11 @@ public class MobileRealtimeChat : MonoBehaviour
         try
         {
             var message = Encoding.UTF8.GetString(data);
-            LogMessage($"Received: {message.Substring(0, Math.Min(100, message.Length))}...");
-            
             var jo = JObject.Parse(message);
             var messageType = jo["type"]?.ToString();
+            
+            LogMessage($"Received message type: {messageType}");
+            LogMessage($"Message content: {message.Substring(0, Math.Min(200, message.Length))}...");
             
             switch (messageType)
             {
@@ -507,7 +660,63 @@ public class MobileRealtimeChat : MonoBehaviour
                     HandleResponseComplete();
                     break;
                     
+                case "response.cancelled":
+                    HandleResponseCancelled(jo);
+                    break;
+                    
+                case "response.output_item.added":
+                case "response.content_part.added":
+                    HandleTextResponse(jo);
+                    break;
+                    
+                case "response.audio.delta":
+                case "response.audio_transcript.delta":
+                    // Handle audio response deltas
+                    HandleAudioResponseDelta(jo);
+                    break;
+                    
+                case "response.output_item.done":
+                case "response.content_part.done":
+                    // Content part completed
+                    LogMessage("Content part completed");
+                    break;
+                    
+                case "session.created":
+                case "session.updated":
+                    LogMessage("Session event received");
+                    break;
+                    
+                case "input_audio_buffer.speech_started":
+                    HandleSpeechStarted(jo);
+                    break;
+                    
+                case "input_audio_buffer.speech_stopped":
+                    HandleSpeechStopped(jo);
+                    break;
+                    
+                case "conversation.item.created":
+                    LogMessage("Conversation item created");
+                    break;
+                    
+                case "output_audio_buffer.started":
+                    HandleOutputAudioBufferStarted(jo);
+                    break;
+                    
+                case "output_audio_buffer.stopped":
+                    HandleOutputAudioBufferStopped(jo);
+                    break;
+                    
+                case "rate_limits.updated":
+                    HandleRateLimitsUpdated(jo);
+                    break;
+                    
+                case "error":
+                    HandleErrorMessage(jo);
+                    break;
+                    
                 default:
+                    LogMessage($"Unhandled message type: {messageType}");
+                    // Still try to extract text from unknown message types
                     HandleTextResponse(jo);
                     break;
             }
@@ -523,17 +732,24 @@ public class MobileRealtimeChat : MonoBehaviour
         var transcript = message["transcript"]?.ToString();
         if (!string.IsNullOrEmpty(transcript))
         {
-            LogMessage($"Audio transcript: {transcript}");
+            LogMessage($"Audio transcript completed: {transcript}");
             currentTranscript.Clear();
             currentTranscript.Append(transcript);
             
             OnTranscriptReceived?.Invoke(transcript);
             
-            // Update UI
+            // Store user input in RAG memory
+            StoreUserMessage(transcript);
+            
+            // Update UI - transcript received, now waiting for AI response
             if (companionUI != null)
             {
                 companionUI.ShowTranscript(transcript);
                 companionUI.AddMessage(transcript, "user");
+                companionUI.ShowProcessingIndicator(false);
+                
+                // Show that we're now waiting for AI response
+                companionUI.UpdateStatusText("AI is thinking...");
             }
         }
     }
@@ -551,13 +767,13 @@ public class MobileRealtimeChat : MonoBehaviour
     private void HandleResponseStart()
     {
         isAIResponding = true;
-        LogMessage("AI response started");
+        LogMessage("AI response started - transitioning to Responding state");
         
-        // Update UI
+        // Update UI to Responding state initially (shows INTERRUPT button)
         if (companionUI != null)
         {
             companionUI.ShowProcessingIndicator(false);
-            companionUI.ShowAudioPlaybackIndicator(true);
+            companionUI.SetToRespondingState();
         }
     }
     
@@ -570,6 +786,66 @@ public class MobileRealtimeChat : MonoBehaviour
         if (companionUI != null)
         {
             companionUI.ShowAudioPlaybackIndicator(false);
+            companionUI.ShowProcessingIndicator(false);
+        }
+    }
+    
+    private void HandleAudioResponseDelta(JObject message)
+    {
+        // Handle audio response chunks
+        LogMessage("Audio response delta received - AI is speaking");
+        
+        // Update UI to show audio is being received
+        if (companionUI != null && !isAIResponding)
+        {
+            companionUI.ShowProcessingIndicator(false);
+            companionUI.ShowAudioPlaybackIndicator(true);
+            
+            // Transition to PlayingAudio state for interrupt capability
+            companionUI.SetToPlayingAudioState();
+            isAIResponding = true;
+        }
+        
+        // Ensure remote audio source is playing
+        if (remoteAudioSource != null && !remoteAudioSource.isPlaying)
+        {
+            remoteAudioSource.Play();
+            LogMessage("Started remote audio playback");
+        }
+    }
+    
+    private void HandleErrorMessage(JObject message)
+    {
+        var errorObj = message["error"];
+        var errorCode = errorObj?["code"]?.ToString();
+        var errorMessage = errorObj?["message"]?.ToString() ?? "Unknown error";
+        var fullError = errorObj?.ToString() ?? "Unknown error";
+        
+        // Handle specific error types
+        if (errorCode == "input_audio_buffer_commit_empty")
+        {
+            LogMessage("Ignoring empty audio buffer error - this can happen with server VAD");
+            
+            // Reset UI state quietly
+            if (companionUI != null)
+            {
+                companionUI.ShowProcessingIndicator(false);
+                if (isConnectionActive)
+                {
+                    companionUI.UpdateStatusText("Ready - Tap to talk");
+                }
+            }
+            return;
+        }
+        
+        LogError($"OpenAI error: {fullError}");
+        OnError?.Invoke($"OpenAI error: {errorMessage}");
+        
+        // Reset UI state
+        if (companionUI != null)
+        {
+            companionUI.ShowProcessingIndicator(false);
+            companionUI.ShowAudioPlaybackIndicator(false);
         }
     }
     
@@ -578,12 +854,24 @@ public class MobileRealtimeChat : MonoBehaviour
         var text = ExtractTextFromMessage(message);
         if (!string.IsNullOrEmpty(text))
         {
+            LogMessage($"Text response: {text.Substring(0, Math.Min(50, text.Length))}...");
             OnAIResponseReceived?.Invoke(text);
             
-            // Update UI
+            // Store AI response in RAG memory
+            StoreAIResponse(text);
+            
+            // Update UI - switch from processing to responding
             if (companionUI != null)
             {
+                companionUI.ShowProcessingIndicator(false);
                 companionUI.AddMessage(text, "assistant");
+                
+                // If we weren't already responding, start now
+                if (!isAIResponding)
+                {
+                    isAIResponding = true;
+                    companionUI.ShowAudioPlaybackIndicator(true);
+                }
             }
         }
     }
@@ -603,22 +891,210 @@ public class MobileRealtimeChat : MonoBehaviour
     // RAG Integration (simplified for coroutines)
     private void GetRAGEnhancedInstructions(System.Action<string> callback)
     {
-        if (!enableRAGContext || ragClient == null)
+        LogMessage($"GetRAGEnhancedInstructions called - enableRAGContext: {enableRAGContext}, ragClient != null: {ragClient != null}");
+        
+        if (!enableRAGContext)
         {
+            LogMessage("RAG context disabled, using default instructions");
             callback?.Invoke(GetDefaultInstructions());
             return;
         }
         
+        if (ragClient == null)
+        {
+            LogError("RAG client is null, using default instructions");
+            callback?.Invoke(GetDefaultInstructions());
+            return;
+        }
+        
+        LogMessage("Starting RAG instructions coroutine");
         StartCoroutine(GetRAGInstructionsCoroutine(callback));
     }
     
     private IEnumerator GetRAGInstructionsCoroutine(System.Action<string> callback)
     {
-        // For now, use default instructions since we can't easily mix async with coroutines
-        // TODO: Implement proper coroutine-based RAG query that uses ragApiUrl, userId, maxRAGResults
+        if (!enableRAGContext || ragClient == null)
+        {
+            callback?.Invoke(GetDefaultInstructions());
+            yield break;
+        }
         
-        callback?.Invoke(GetDefaultInstructions());
-        yield break;
+        LogMessage("Querying RAG for conversation context...");
+        
+        // Query for recent conversation context with the user's current input if available
+        string currentContext = currentTranscript.Length > 0 ? currentTranscript.ToString() : "conversation memory and personal information";
+        
+        var queryTask = System.Threading.Tasks.Task.Run(async () =>
+        {
+            try
+            {
+                // Use current context for more relevant retrieval
+                var results = await ragClient.QueryAsync(currentContext, userId, maxRAGResults);
+                LogMessage($"RAG query for '{currentContext}' returned {results?.Count ?? 0} results");
+                return results ?? new List<RAGResult>();
+            }
+            catch (System.Exception ex)
+            {
+                LogError($"Failed to query RAG context: {ex.Message}");
+                return new List<RAGResult>();
+            }
+        });
+        
+        // Wait for task completion
+        while (!queryTask.IsCompleted)
+        {
+            yield return null;
+        }
+        
+        // Build enhanced instructions with RAG context
+        string enhancedInstructions = BuildEnhancedInstructions(queryTask.Result);
+        callback?.Invoke(enhancedInstructions);
+    }
+    
+    private string BuildEnhancedInstructions(List<RAGResult> ragResults)
+    {
+        var baseInstructions = GetDefaultInstructions();
+        
+        if (ragResults == null || ragResults.Count == 0)
+        {
+            LogMessage("No RAG context found, using default instructions");
+            return baseInstructions;
+        }
+        
+        LogMessage($"Found {ragResults.Count} relevant conversation memories");
+        
+        var contextBuilder = new System.Text.StringBuilder();
+        contextBuilder.AppendLine(baseInstructions);
+        contextBuilder.AppendLine();
+        contextBuilder.AppendLine("## Recent Conversation Context:");
+        contextBuilder.AppendLine("You have access to the following recent conversation history and personal information about the user:");
+        contextBuilder.AppendLine();
+        
+        foreach (var result in ragResults)
+        {
+            if (!string.IsNullOrEmpty(result.text))
+            {
+                contextBuilder.AppendLine($"- {result.text}");
+                LogMessage($"Including RAG context: {result.text.Substring(0, Math.Min(100, result.text.Length))}...");
+            }
+        }
+        
+        contextBuilder.AppendLine();
+        contextBuilder.AppendLine("## Important Instructions:");
+        contextBuilder.AppendLine("- Use ONLY the information provided in the context above");
+        contextBuilder.AppendLine("- If asked about names, people, or specific details NOT mentioned in the context, say \"I don't have that information from our previous conversations\"");
+        contextBuilder.AppendLine("- DO NOT make up or invent names, facts, or details that aren't in the provided context");
+        contextBuilder.AppendLine("- Reference previous conversations naturally when the context supports it");
+        contextBuilder.AppendLine("- If the context is empty or irrelevant, respond based on the current conversation only");
+        
+        var enhancedInstructions = contextBuilder.ToString();
+        LogMessage($"Enhanced instructions built with {ragResults.Count} context items");
+        
+        return enhancedInstructions;
+    }
+    
+    private bool ContainsNameIndicators(string text)
+    {
+        if (string.IsNullOrEmpty(text)) return false;
+        
+        string lowerText = text.ToLower();
+        
+        // Check for common name-related phrases
+        string[] nameIndicators = {
+            "my name is", "i'm called", "call me", "i am", "named", 
+            "his name", "her name", "their name", "name is",
+            "what's my name", "who am i", "do you remember my name"
+        };
+        
+        return nameIndicators.Any(indicator => lowerText.Contains(indicator));
+    }
+    
+    // Public method for testing RAG functionality
+    public void TestRAGConnection()
+    {
+        if (!enableRAGContext || ragClient == null)
+        {
+            LogError("Cannot test RAG - context disabled or client missing");
+            return;
+        }
+        
+        LogMessage("Testing RAG connection by storing a test message...");
+        
+        var testMessage = $"RAG test message - {System.DateTime.Now}";
+        StartCoroutine(TestRAGCoroutine(testMessage));
+    }
+    
+    private IEnumerator TestRAGCoroutine(string testMessage)
+    {
+        // Test storage
+        LogMessage($"Testing RAG storage with: {testMessage}");
+        
+        var metadata = new Dictionary<string, object>
+        {
+            ["test"] = true,
+            ["timestamp"] = System.DateTime.UtcNow.ToString()
+        };
+        
+        var storeTask = System.Threading.Tasks.Task.Run(async () =>
+        {
+            try
+            {
+                bool result = await ragClient.StoreMemoryAsync(userId, "test", testMessage, metadata);
+                LogMessage($"RAG store test result: {result}");
+                return result;
+            }
+            catch (System.Exception ex)
+            {
+                LogError($"RAG store test failed: {ex.Message}");
+                return false;
+            }
+        });
+        
+        while (!storeTask.IsCompleted)
+        {
+            yield return null;
+        }
+        
+        if (storeTask.Result)
+        {
+            LogMessage("RAG storage test successful!");
+            
+            // Test retrieval
+            yield return new WaitForSeconds(1f); // Wait a moment
+            
+            var queryTask = System.Threading.Tasks.Task.Run(async () =>
+            {
+                try
+                {
+                    var results = await ragClient.QueryAsync("RAG test", userId, 1);
+                    LogMessage($"RAG query test returned {results?.Count ?? 0} results");
+                    return results;
+                }
+                catch (System.Exception ex)
+                {
+                    LogError($"RAG query test failed: {ex.Message}");
+                    return new List<RAGResult>();
+                }
+            });
+            
+            while (!queryTask.IsCompleted)
+            {
+                yield return null;
+            }
+            
+            if (queryTask.Result?.Count > 0)
+            {
+                LogMessage("✅ RAG connection test PASSED - storage and retrieval working!");
+            }
+            else
+            {
+                LogMessage("❌ RAG retrieval test failed - storage worked but query returned no results");
+            }
+        }
+        else
+        {
+            LogMessage("❌ RAG connection test FAILED - storage not working");
+        }
     }
     
     private IEnumerator SendTextMessageWithRAGContext(string message)
@@ -664,11 +1140,477 @@ public class MobileRealtimeChat : MonoBehaviour
         // Send message
         dataChannel.Send(Encoding.UTF8.GetBytes(evt.ToString(Formatting.None)));
         
-        // Trigger response
-        var responseEvt = new JObject { ["type"] = "response.create" };
+        // For text messages, create response immediately since no audio buffer is involved
+        var responseEvt = new JObject 
+        { 
+            ["type"] = "response.create",
+            ["response"] = new JObject
+            {
+                ["modalities"] = new JArray { "text", "audio" }
+            }
+        };
         dataChannel.Send(Encoding.UTF8.GetBytes(responseEvt.ToString(Formatting.None)));
         
-        LogMessage($"Sent text message: {message}");
+        LogMessage($"Sent text message and created response: {message}");
+    }
+    
+    private void SendClearAudioBuffer()
+    {
+        if (dataChannel?.ReadyState != RTCDataChannelState.Open)
+        {
+            LogError("Cannot clear audio buffer - data channel not ready");
+            return;
+        }
+        
+        // Clear any existing audio buffer to start fresh
+        var clearEvt = new JObject { ["type"] = "input_audio_buffer.clear" };
+        dataChannel.Send(Encoding.UTF8.GetBytes(clearEvt.ToString(Formatting.None)));
+        
+        LogMessage("Cleared input audio buffer for fresh start");
+    }
+    
+    private void SendResponseCancel()
+    {
+        if (dataChannel?.ReadyState != RTCDataChannelState.Open)
+        {
+            LogError("Cannot send response cancel - data channel not ready");
+            return;
+        }
+        
+        // Send response cancel event to interrupt AI
+        var cancelEvt = new JObject { ["type"] = "response.cancel" };
+        dataChannel.Send(Encoding.UTF8.GetBytes(cancelEvt.ToString(Formatting.None)));
+        
+        LogMessage("Sent response cancel to OpenAI");
+    }
+    
+    private IEnumerator StreamAudioToOpenAI()
+    {
+        LogMessage("Starting audio streaming coroutine");
+        
+        while (isTalking && microphoneClip != null)
+        {
+            // Process audio data with error handling (no yield in try-catch)
+            ProcessAudioChunk();
+            
+            yield return new WaitForSeconds(0.1f); // Stream in 100ms chunks
+        }
+        
+        LogMessage("Audio streaming coroutine ended");
+    }
+    
+    private void ProcessAudioChunk()
+    {
+        try
+        {
+            int currentPosition = Microphone.GetPosition(null);
+            
+            if (currentPosition != lastMicrophonePosition)
+            {
+                // Calculate how much new audio data we have
+                int sampleLength = currentPosition - lastMicrophonePosition;
+                if (sampleLength < 0)
+                {
+                    // Handle wrap-around (circular buffer)
+                    sampleLength = microphoneClip.samples - lastMicrophonePosition + currentPosition;
+                }
+                
+                if (sampleLength > 0 && sampleLength < microphoneClip.samples)
+                {
+                    // Get the new audio samples (with bounds checking)
+                    float[] audioData = new float[sampleLength];
+                    microphoneClip.GetData(audioData, lastMicrophonePosition);
+                    
+                    // Convert to PCM16 and send to OpenAI
+                    SendAudioDataToOpenAI(audioData);
+                    
+                    lastMicrophonePosition = currentPosition;
+                }
+            }
+        }
+        catch (System.Exception ex)
+        {
+            LogError($"Error processing audio chunk: {ex.Message}");
+        }
+    }
+    
+    private void SendAudioDataToOpenAI(float[] audioData)
+    {
+        if (dataChannel?.ReadyState != RTCDataChannelState.Open)
+        {
+            return;
+        }
+        
+        try
+        {
+            // Convert float audio to PCM16 bytes
+            byte[] pcm16Data = new byte[audioData.Length * 2];
+            for (int i = 0; i < audioData.Length; i++)
+            {
+                short sample = (short)(audioData[i] * 32767f);
+                pcm16Data[i * 2] = (byte)(sample & 0xFF);
+                pcm16Data[i * 2 + 1] = (byte)((sample >> 8) & 0xFF);
+            }
+            
+            // Encode to base64
+            string base64Audio = System.Convert.ToBase64String(pcm16Data);
+            
+            // Send audio append event
+            var audioEvent = new JObject
+            {
+                ["type"] = "input_audio_buffer.append",
+                ["audio"] = base64Audio
+            };
+            
+            dataChannel.Send(Encoding.UTF8.GetBytes(audioEvent.ToString(Formatting.None)));
+            
+            LogMessage($"Sent {audioData.Length} audio samples to OpenAI");
+        }
+        catch (System.Exception ex)
+        {
+            LogError($"Error sending audio data: {ex.Message}");
+        }
+    }
+    
+    private void HandleSpeechStarted(JObject message)
+    {
+        LogMessage("Server VAD detected speech started");
+        
+        // Update UI to show speech is being detected
+        if (companionUI != null)
+        {
+            companionUI.UpdateStatusText("Speech detected - keep talking...");
+        }
+        
+        // Update session instructions with fresh RAG context when user starts speaking
+        if (enableRAGContext)
+        {
+            StartCoroutine(UpdateSessionInstructionsWithRAG());
+        }
+    }
+    
+    private IEnumerator UpdateSessionInstructionsWithRAG()
+    {
+        LogMessage("Updating session instructions with fresh RAG context...");
+        
+        // Update the current transcript for better RAG targeting
+        string instructions = GetDefaultInstructions();
+        bool instructionsReceived = false;
+        string enhancedInstructions = "";
+        
+        GetRAGEnhancedInstructions((result) => {
+            enhancedInstructions = result;
+            instructionsReceived = true;
+        });
+        
+        // Wait for RAG instructions
+        while (!instructionsReceived)
+        {
+            yield return null;
+        }
+        
+        // Send updated session configuration
+        if (dataChannel?.ReadyState == RTCDataChannelState.Open)
+        {
+            var updateEvt = new JObject
+            {
+                ["type"] = "session.update",
+                ["session"] = new JObject
+                {
+                    ["instructions"] = enhancedInstructions
+                }
+            };
+            
+            dataChannel.Send(Encoding.UTF8.GetBytes(updateEvt.ToString(Formatting.None)));
+            LogMessage("Updated session instructions with fresh RAG context");
+        }
+    }
+    
+    private void HandleSpeechStopped(JObject message)
+    {
+        LogMessage("Server VAD detected speech stopped - processing audio");
+        
+        // Update UI to show we're processing
+        if (companionUI != null)
+        {
+            companionUI.ShowRecordingIndicator(false);
+            companionUI.ShowProcessingIndicator(true);
+            companionUI.UpdateStatusText("Processing speech...");
+        }
+        
+        // Disable microphone since speech ended
+        if (localMicTrack != null)
+        {
+            localMicTrack.Enabled = false;
+            isTalking = false;
+        }
+    }
+    
+    private void HandleOutputAudioBufferStarted(JObject message)
+    {
+        LogMessage("AI audio output started - transitioning UI to PlayingAudio state");
+        
+        // Update UI to show AI is speaking with interrupt capability
+        if (companionUI != null)
+        {
+            companionUI.ShowProcessingIndicator(false);
+            companionUI.ShowAudioPlaybackIndicator(true);
+            
+            // Transition to PlayingAudio state which shows INTERRUPT button by default
+            companionUI.SetToPlayingAudioState();
+        }
+    }
+    
+    private void HandleOutputAudioBufferStopped(JObject message)
+    {
+        LogMessage("AI audio output stopped - response complete, ready for next turn");
+        
+        // Reset to idle state for next conversation turn
+        if (companionUI != null)
+        {
+            companionUI.ShowAudioPlaybackIndicator(false);
+            companionUI.ShowProcessingIndicator(false);
+            companionUI.UpdateStatusText("Ready - Tap to talk");
+            
+            // Reset UI state for continuous conversation
+            companionUI.ResetToIdleState();
+        }
+        
+        // Mark response as complete
+        isAIResponding = false;
+    }
+    
+    private void HandleResponseCancelled(JObject message)
+    {
+        LogMessage("AI response was cancelled - ready for user input");
+        
+        // Reset UI state after cancellation
+        if (companionUI != null)
+        {
+            companionUI.ShowAudioPlaybackIndicator(false);
+            companionUI.ShowProcessingIndicator(false);
+        }
+        
+        // Mark response as no longer active
+        isAIResponding = false;
+    }
+    
+    // RAG Memory Storage Methods
+    private void StoreUserMessage(string message)
+    {
+        LogMessage($"StoreUserMessage called - enableRAGContext: {enableRAGContext}, ragClient != null: {ragClient != null}, message length: {message?.Length ?? 0}");
+        
+        if (!enableRAGContext)
+        {
+            LogMessage("RAG context disabled, not storing user message");
+            return;
+        }
+        
+        if (ragClient == null)
+        {
+            LogError("RAG client is null, cannot store user message");
+            return;
+        }
+        
+        if (string.IsNullOrEmpty(message))
+        {
+            LogMessage("Message is empty, not storing");
+            return;
+        }
+        
+        LogMessage($"Starting to store user message: {message}");
+        StartCoroutine(StoreUserMessageCoroutine(message));
+    }
+    
+    private void StoreAIResponse(string response)
+    {
+        LogMessage($"StoreAIResponse called - enableRAGContext: {enableRAGContext}, ragClient != null: {ragClient != null}, response length: {response?.Length ?? 0}");
+        
+        if (!enableRAGContext)
+        {
+            LogMessage("RAG context disabled, not storing AI response");
+            return;
+        }
+        
+        if (ragClient == null)
+        {
+            LogError("RAG client is null, cannot store AI response");
+            return;
+        }
+        
+        if (string.IsNullOrEmpty(response))
+        {
+            LogMessage("Response is empty, not storing");
+            return;
+        }
+        
+        LogMessage($"Starting to store AI response: {response}");
+        StartCoroutine(StoreAIResponseCoroutine(response));
+    }
+    
+    private IEnumerator StoreUserMessageCoroutine(string message)
+    {
+        LogMessage($"Storing user message in RAG: {message.Substring(0, Math.Min(50, message.Length))}...");
+        
+        var metadata = new Dictionary<string, object>
+        {
+            ["timestamp"] = System.DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ"),
+            ["message_type"] = "user_input",
+            ["source"] = "voice",
+            ["conversation_turn"] = System.DateTime.UtcNow.Ticks,
+            ["contains_names"] = ContainsNameIndicators(message),
+            ["is_question"] = message.TrimEnd().EndsWith("?"),
+            ["session_id"] = System.Guid.NewGuid().ToString()
+        };
+        
+        // Use Task.Run to avoid blocking the main thread
+        var storeTask = System.Threading.Tasks.Task.Run(async () =>
+        {
+            try
+            {
+                await ragClient.StoreMemoryAsync(userId, "conversation", message, metadata);
+                return true;
+            }
+            catch (System.Exception ex)
+            {
+                LogError($"Failed to store user message: {ex.Message}");
+                return false;
+            }
+        });
+        
+        // Wait for task completion in a coroutine-friendly way
+        while (!storeTask.IsCompleted)
+        {
+            yield return null;
+        }
+        
+        if (storeTask.Result)
+        {
+            LogMessage("User message stored successfully in RAG");
+        }
+    }
+    
+    private IEnumerator StoreAIResponseCoroutine(string response)
+    {
+        LogMessage($"Storing AI response in RAG: {response.Substring(0, Math.Min(50, response.Length))}...");
+        
+        var metadata = new Dictionary<string, object>
+        {
+            ["timestamp"] = System.DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ"),
+            ["message_type"] = "ai_response",
+            ["source"] = "realtime_api",
+            ["model"] = realtimeModel,
+            ["conversation_turn"] = System.DateTime.UtcNow.Ticks,
+            ["contains_names"] = ContainsNameIndicators(response),
+            ["session_id"] = System.Guid.NewGuid().ToString()
+        };
+        
+        // Use Task.Run to avoid blocking the main thread
+        var storeTask = System.Threading.Tasks.Task.Run(async () =>
+        {
+            try
+            {
+                await ragClient.StoreMemoryAsync(userId, "conversation", response, metadata);
+                return true;
+            }
+            catch (System.Exception ex)
+            {
+                LogError($"Failed to store AI response: {ex.Message}");
+                return false;
+            }
+        });
+        
+        // Wait for task completion in a coroutine-friendly way
+        while (!storeTask.IsCompleted)
+        {
+            yield return null;
+        }
+        
+        if (storeTask.Result)
+        {
+            LogMessage("AI response stored successfully in RAG");
+        }
+    }
+    
+    private void HandleRateLimitsUpdated(JObject message)
+    {
+        // Just log rate limit info, no action needed
+        LogMessage("Rate limits updated by OpenAI");
+    }
+    
+    private void SendSessionConfiguration()
+    {
+        if (dataChannel?.ReadyState != RTCDataChannelState.Open)
+        {
+            LogError("Cannot send session config - data channel not ready");
+            return;
+        }
+        
+        LogMessage("Preparing session configuration with RAG context...");
+        StartCoroutine(SendSessionConfigurationWithRAG());
+    }
+    
+    private IEnumerator SendSessionConfigurationWithRAG()
+    {
+        string instructions = GetDefaultInstructions();
+        
+        // Get enhanced instructions with RAG context
+        if (enableRAGContext)
+        {
+            bool instructionsReceived = false;
+            string enhancedInstructions = "";
+            
+            GetRAGEnhancedInstructions((result) => {
+                enhancedInstructions = result;
+                instructionsReceived = true;
+            });
+            
+            // Wait for RAG instructions
+            while (!instructionsReceived)
+            {
+                yield return null;
+            }
+            
+            instructions = enhancedInstructions;
+        }
+        
+        // Configure session for voice input with server VAD
+        var configEvt = new JObject
+        {
+            ["type"] = "session.update",
+            ["session"] = new JObject
+            {
+                ["modalities"] = new JArray { "text", "audio" },
+                ["instructions"] = instructions,
+                ["voice"] = "alloy",
+                ["input_audio_format"] = "pcm16",
+                ["output_audio_format"] = "pcm16",
+                ["input_audio_transcription"] = new JObject
+                {
+                    ["model"] = "whisper-1"
+                },
+                ["turn_detection"] = new JObject
+                {
+                    ["type"] = "server_vad",
+                    ["threshold"] = 0.5,
+                    ["prefix_padding_ms"] = 300,
+                    ["silence_duration_ms"] = 2000
+                },
+                ["tool_choice"] = "none",
+                ["temperature"] = 0.8,
+                ["max_response_output_tokens"] = 4096
+            }
+        };
+        
+        if (dataChannel?.ReadyState == RTCDataChannelState.Open)
+        {
+            dataChannel.Send(Encoding.UTF8.GetBytes(configEvt.ToString(Formatting.None)));
+            LogMessage("Sent session configuration with RAG context");
+        }
+        else
+        {
+            LogError("Data channel closed while preparing session config");
+        }
     }
     
     // Connection management
@@ -748,9 +1690,16 @@ public class MobileRealtimeChat : MonoBehaviour
     
     private string GetDefaultInstructions()
     {
-        return "You are a helpful AI assistant with access to the user's personal information and context. " +
-               "Respond naturally and conversationally, incorporating relevant personal details when appropriate. " +
-               "Keep responses concise but informative.";
+        string baseInstructions = "You are a helpful AI assistant with memory capabilities. " +
+               "You can remember information from previous conversations with this user. " +
+               "Respond naturally and conversationally, incorporating relevant personal details when available. " +
+               "Keep responses concise but informative. " +
+               "IMPORTANT: Only reference information you have been explicitly provided in your context. " +
+               "If you don't know something specific (like names, dates, or details), " +
+               "clearly state that you don't have that information rather than guessing or making something up.";
+        
+        LogMessage($"Generated default instructions: {baseInstructions.Substring(0, Math.Min(100, baseInstructions.Length))}...");
+        return baseInstructions;
     }
     
     private void LogMessage(string message)
@@ -763,10 +1712,31 @@ public class MobileRealtimeChat : MonoBehaviour
         Debug.LogError($"[MobileRealtimeChat] {message}");
     }
     
+    // Audio testing and debugging
+    public void TestAudioOutput()
+    {
+        if (remoteAudioSource == null)
+        {
+            LogError("Remote audio source not initialized");
+            return;
+        }
+        
+        LogMessage($"Audio Source Status:");
+        LogMessage($"- Volume: {remoteAudioSource.volume}");
+        LogMessage($"- Is Playing: {remoteAudioSource.isPlaying}");
+        LogMessage($"- Mute: {remoteAudioSource.mute}");
+        LogMessage($"- Audio Settings Output Sample Rate: {AudioSettings.outputSampleRate}");
+        LogMessage($"- Audio Settings Speaker Mode: {AudioSettings.speakerMode}");
+        
+        // Check if we have a valid audio track
+        LogMessage($"- Has WebRTC Track: {remoteAudioSource.clip != null}");
+    }
+    
     // Public properties
     public bool IsConnected => isConnectionActive;
     public bool IsTalking => isTalking;
     public bool IsAIResponding => isAIResponding;
+    public AudioSource RemoteAudioSource => remoteAudioSource;
     
     private void OnDestroy()
     {
