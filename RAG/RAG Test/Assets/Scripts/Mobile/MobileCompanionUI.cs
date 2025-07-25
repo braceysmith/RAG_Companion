@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UI;
@@ -19,11 +20,31 @@ public class MobileCompanionUI : MonoBehaviour
     [SerializeField] private bool enableHapticFeedback = true;
     [SerializeField] private float messageAnimationDuration = 0.3f;
     
+    [Header("Voice Control UI")]
+    [SerializeField] private Button voiceRecordButton;
+    [SerializeField] private Image voiceButtonImage;
+    [SerializeField] private TextMeshProUGUI voiceButtonText;
+    [SerializeField] private GameObject recordingIndicator;
+    [SerializeField] private GameObject processingIndicator;
+    [SerializeField] private TextMeshProUGUI transcriptText;
+    [SerializeField] private GameObject transcriptPanel;
+    
+    [Header("Audio Playback UI")]
+    [SerializeField] private GameObject audioPlaybackIndicator;
+    [SerializeField] private Image audioWaveform;
+    [SerializeField] private TextMeshProUGUI audioStatusText;
+    
     [Header("Status Indicators")]
     [SerializeField] private Image connectionStatusIcon;
     [SerializeField] private TextMeshProUGUI statusText;
     [SerializeField] private GameObject typingIndicator;
     [SerializeField] private GameObject offlineIndicator;
+    
+    [Header("Error Handling")]
+    [SerializeField] private GameObject errorPanel;
+    [SerializeField] private TextMeshProUGUI errorMessageText;
+    [SerializeField] private Button retryButton;
+    [SerializeField] private Button closeErrorButton;
     
     [Header("Colors")]
     [SerializeField] private Color userMessageColor = Color.blue;
@@ -36,6 +57,32 @@ public class MobileCompanionUI : MonoBehaviour
     private List<GameObject> messageObjects = new List<GameObject>();
     private int maxVisibleMessages = 50;
     private bool isTyping = false;
+    
+    // Voice state management
+    private ConversationState currentState = ConversationState.Idle;
+    private bool isRecording = false;
+    private bool isProcessing = false;
+    private bool isPlayingAudio = false;
+    
+    // Component references
+    private MobileRAGCompanionSystem companionSystem;
+    private MobileAudioManager audioManager;
+    private MobileRealtimeChat realtimeChat;
+    
+    // Voice button states
+    private Color defaultButtonColor;
+    private Color recordingButtonColor = Color.red;
+    private Color processingButtonColor = Color.yellow;
+    
+    public enum ConversationState
+    {
+        Idle,
+        Listening,
+        Processing,
+        Responding,
+        PlayingAudio,
+        Error
+    }
     
     // Events
     public event Action<string> OnUserMessageSubmitted;
@@ -52,8 +99,31 @@ public class MobileCompanionUI : MonoBehaviour
     
     private void InitializeMobileUI()
     {
+        // Initialize component references
+        companionSystem = FindFirstObjectByType<MobileRAGCompanionSystem>();
+        audioManager = FindFirstObjectByType<MobileAudioManager>();
+        realtimeChat = FindFirstObjectByType<MobileRealtimeChat>();
+        
         // Configure for mobile
         ConfigureMobileLayout();
+        
+        // Store default button color
+        if (voiceButtonImage != null)
+        {
+            defaultButtonColor = voiceButtonImage.color;
+        }
+        
+        // Initialize voice UI states
+        if (recordingIndicator != null)
+            recordingIndicator.SetActive(false);
+        if (processingIndicator != null)
+            processingIndicator.SetActive(false);
+        if (audioPlaybackIndicator != null)
+            audioPlaybackIndicator.SetActive(false);
+        if (transcriptPanel != null)
+            transcriptPanel.SetActive(false);
+        if (errorPanel != null)
+            errorPanel.SetActive(false);
         
         // Setup message input
         if (messageInput != null)
@@ -68,9 +138,30 @@ public class MobileCompanionUI : MonoBehaviour
             sendButton.onClick.AddListener(OnSendButtonClicked);
         }
         
+        // Setup voice button
+        if (voiceRecordButton != null)
+        {
+            voiceRecordButton.onClick.AddListener(OnVoiceButtonClicked);
+        }
+        
+        // Setup error panel buttons
+        if (retryButton != null)
+        {
+            retryButton.onClick.AddListener(OnRetryButtonClicked);
+        }
+        if (closeErrorButton != null)
+        {
+            closeErrorButton.onClick.AddListener(OnCloseErrorButtonClicked);
+        }
+        
         // Initialize status indicators
         UpdateConnectionStatus(false);
         UpdateOfflineStatus(false);
+        UpdateStatusText("Ready - Tap to talk");
+        UpdateVoiceButtonText("🎤 Talk");
+        
+        // Set initial state
+        SetState(ConversationState.Idle);
         
         LogMessage("Mobile UI initialized");
     }
@@ -119,6 +210,36 @@ public class MobileCompanionUI : MonoBehaviour
     
     private void SetupEventHandlers()
     {
+        // Audio manager events
+        if (audioManager != null)
+        {
+            audioManager.OnRecordingStarted += OnRecordingStarted;
+            audioManager.OnRecordingStopped += OnRecordingStopped;
+            audioManager.OnVoiceDetected += OnVoiceDetected;
+            audioManager.OnVoiceEnded += OnVoiceEnded;
+            audioManager.OnAudioPlaybackCompleted += OnAudioPlaybackCompleted;
+            audioManager.OnError += OnAudioError;
+        }
+        
+        // Companion system events
+        if (companionSystem != null)
+        {
+            companionSystem.OnUserMessage += OnUserMessage;
+            companionSystem.OnAssistantResponse += OnAssistantResponse;
+            companionSystem.OnError += OnSystemError;
+            companionSystem.OnSystemStatusChanged += OnSystemStatusChanged;
+        }
+        
+        // Realtime chat events
+        if (realtimeChat != null)
+        {
+            realtimeChat.OnConnectionEstablished += OnRealtimeConnected;
+            realtimeChat.OnConnectionLost += OnRealtimeDisconnected;
+            realtimeChat.OnTranscriptReceived += OnTranscriptReceived;
+            realtimeChat.OnAIResponseReceived += OnAIResponseReceived;
+            realtimeChat.OnError += OnRealtimeError;
+        }
+        
         // Touch and gesture handling
         if (enableSwipeGestures)
         {
@@ -136,6 +257,8 @@ public class MobileCompanionUI : MonoBehaviour
         {
             SetupHapticFeedback();
         }
+        
+        LogMessage("Event handlers configured");
     }
     
     private void SetupSwipeGestures()
@@ -368,8 +491,16 @@ public class MobileCompanionUI : MonoBehaviour
         // Show typing indicator
         ShowTypingIndicator(true);
         
-        // Notify listeners
-        OnUserMessageSubmitted?.Invoke(message);
+        // Send through realtime chat if connected, otherwise use traditional method
+        if (realtimeChat != null && realtimeChat.IsConnected)
+        {
+            realtimeChat.SendTextMessage(message);
+        }
+        else
+        {
+            // Notify listeners (traditional method)
+            OnUserMessageSubmitted?.Invoke(message);
+        }
         
         // Haptic feedback
         if (enableHapticFeedback)
@@ -423,7 +554,30 @@ public class MobileCompanionUI : MonoBehaviour
     
     public void ShowError(string error)
     {
+        LogError($"Showing error: {error}");
+        
+        if (errorMessageText != null)
+        {
+            errorMessageText.text = error;
+        }
+        
+        if (errorPanel != null)
+        {
+            errorPanel.SetActive(true);
+        }
+        
         AddMessage($"Error: {error}", "system");
+        SetState(ConversationState.Error);
+    }
+    
+    public void HideError()
+    {
+        if (errorPanel != null)
+        {
+            errorPanel.SetActive(false);
+        }
+        
+        SetState(ConversationState.Idle);
     }
     
     public void ClearChat()
@@ -483,7 +637,35 @@ public class MobileCompanionUI : MonoBehaviour
     
     private void OnDestroy()
     {
-        // Cleanup
+        // Remove event handlers
+        if (audioManager != null)
+        {
+            audioManager.OnRecordingStarted -= OnRecordingStarted;
+            audioManager.OnRecordingStopped -= OnRecordingStopped;
+            audioManager.OnVoiceDetected -= OnVoiceDetected;
+            audioManager.OnVoiceEnded -= OnVoiceEnded;
+            audioManager.OnAudioPlaybackCompleted -= OnAudioPlaybackCompleted;
+            audioManager.OnError -= OnAudioError;
+        }
+        
+        if (companionSystem != null)
+        {
+            companionSystem.OnUserMessage -= OnUserMessage;
+            companionSystem.OnAssistantResponse -= OnAssistantResponse;
+            companionSystem.OnError -= OnSystemError;
+            companionSystem.OnSystemStatusChanged -= OnSystemStatusChanged;
+        }
+        
+        if (realtimeChat != null)
+        {
+            realtimeChat.OnConnectionEstablished -= OnRealtimeConnected;
+            realtimeChat.OnConnectionLost -= OnRealtimeDisconnected;
+            realtimeChat.OnTranscriptReceived -= OnTranscriptReceived;
+            realtimeChat.OnAIResponseReceived -= OnAIResponseReceived;
+            realtimeChat.OnError -= OnRealtimeError;
+        }
+        
+        // Cleanup UI event handlers
         if (messageInput != null)
         {
             messageInput.onEndEdit.RemoveListener(OnMessageInputSubmitted);
@@ -493,6 +675,430 @@ public class MobileCompanionUI : MonoBehaviour
         {
             sendButton.onClick.RemoveListener(OnSendButtonClicked);
         }
+        
+        if (voiceRecordButton != null)
+        {
+            voiceRecordButton.onClick.RemoveListener(OnVoiceButtonClicked);
+        }
+        
+        LogMessage("Mobile Companion UI destroyed");
+    }
+    
+    // Voice Control Methods
+    private void OnVoiceButtonClicked()
+    {
+        LogMessage($"Voice button clicked - Current state: {currentState}");
+        
+        switch (currentState) 
+        {
+            case ConversationState.Idle:
+                StartVoiceRecording();
+                break;
+                
+            case ConversationState.Listening:
+                StopVoiceRecording();
+                break;
+                
+            case ConversationState.PlayingAudio:
+                StopAudioPlayback();
+                break;
+                
+            default:
+                LogMessage($"Voice button disabled in state: {currentState}");
+                break;
+        }
+    }
+    
+    private void StartVoiceRecording()
+    {
+        // Prefer WebRTC realtime chat for voice input
+        if (realtimeChat != null && realtimeChat.IsConnected)
+        {
+            realtimeChat.StartVoiceInput();
+            SetState(ConversationState.Listening);
+        }
+        else if (realtimeChat != null && !realtimeChat.IsConnected)
+        {
+            // Start realtime session first
+            realtimeChat.StartRealtimeSession();
+            SetState(ConversationState.Processing);
+            UpdateStatusText("Connecting to voice chat...");
+        }
+        else if (companionSystem != null)
+        {
+            // Fallback to companion system
+            companionSystem.StartVoiceRecording();
+            SetState(ConversationState.Listening);
+        }
+        else
+        {
+            ShowError("Voice system not available");
+        }
+    }
+    
+    private void StopVoiceRecording()
+    {
+        // Prefer WebRTC realtime chat
+        if (realtimeChat != null && realtimeChat.IsTalking)
+        {
+            realtimeChat.StopVoiceInput();
+            SetState(ConversationState.Processing);
+        }
+        else if (companionSystem != null)
+        {
+            // Fallback to companion system
+            companionSystem.StopVoiceRecording();
+            SetState(ConversationState.Processing);
+        }
+    }
+    
+    private void StopAudioPlayback()
+    {
+        if (audioManager != null)
+        {
+            audioManager.StopPlayback();
+            SetState(ConversationState.Idle);
+        }
+    }
+    
+    // State Management
+    private void SetState(ConversationState newState)
+    {
+        ConversationState previousState = currentState;
+        currentState = newState;
+        
+        LogMessage($"State changed: {previousState} → {newState}");
+        
+        UpdateUIForState(newState);
+    }
+    
+    private void UpdateUIForState(ConversationState state)
+    {
+        // Reset all indicators
+        ShowRecordingIndicator(false);
+        ShowProcessingIndicator(false);
+        ShowAudioPlaybackIndicator(false);
+        
+        switch (state)
+        {
+            case ConversationState.Idle:
+                UpdateStatusText("Ready - Tap to talk");
+                UpdateVoiceButtonText("MIC Talk");
+                SetVoiceButtonColor(defaultButtonColor);
+                SetVoiceButtonEnabled(true);
+                break;
+                
+            case ConversationState.Listening:
+                UpdateStatusText("Listening... Tap to stop");
+                UpdateVoiceButtonText("STOP");
+                SetVoiceButtonColor(recordingButtonColor);
+                SetVoiceButtonEnabled(true);
+                ShowRecordingIndicator(true);
+                break;
+                
+            case ConversationState.Processing:
+                UpdateStatusText("Processing voice...");
+                UpdateVoiceButtonText("PROCESSING");
+                SetVoiceButtonColor(processingButtonColor);
+                SetVoiceButtonEnabled(false);
+                ShowProcessingIndicator(true);
+                break;
+                
+            case ConversationState.Responding:
+                UpdateStatusText("AI is thinking...");
+                UpdateVoiceButtonText("THINKING");
+                SetVoiceButtonColor(processingButtonColor);
+                SetVoiceButtonEnabled(false);
+                ShowProcessingIndicator(true);
+                break;
+                
+            case ConversationState.PlayingAudio:
+                UpdateStatusText("AI is speaking... Tap to stop");
+                UpdateVoiceButtonText("STOP AUDIO");
+                SetVoiceButtonColor(defaultButtonColor);
+                SetVoiceButtonEnabled(true);
+                ShowAudioPlaybackIndicator(true);
+                break;
+                
+            case ConversationState.Error:
+                UpdateStatusText("Error occurred - Check details");
+                UpdateVoiceButtonText("ERROR");
+                SetVoiceButtonColor(Color.red);
+                SetVoiceButtonEnabled(true);
+                break;
+        }
+    }
+    
+    // UI Update Methods
+    private void UpdateStatusText(string text)
+    {
+        if (statusText != null)
+        {
+            statusText.text = text;
+        }
+    }
+    
+    private void UpdateVoiceButtonText(string text)
+    {
+        if (voiceButtonText != null)
+        {
+            voiceButtonText.text = text;
+        }
+    }
+    
+    private void SetVoiceButtonColor(Color color)
+    {
+        if (voiceButtonImage != null)
+        {
+            voiceButtonImage.color = color;
+        }
+    }
+    
+    private void SetVoiceButtonEnabled(bool enabled)
+    {
+        if (voiceRecordButton != null)
+        {
+            voiceRecordButton.interactable = enabled;
+        }
+    }
+    
+    // Voice Indicator Methods
+    public void ShowRecordingIndicator(bool show = true)
+    {
+        if (recordingIndicator != null)
+        {
+            recordingIndicator.SetActive(show);
+            isRecording = show;
+        }
+    }
+    
+    public void ShowProcessingIndicator(bool show = true)
+    {
+        if (processingIndicator != null)
+        {
+            processingIndicator.SetActive(show);
+            isProcessing = show;
+        }
+    }
+    
+    public void ShowAudioPlaybackIndicator(bool show = true)
+    {
+        if (audioPlaybackIndicator != null)
+        {
+            audioPlaybackIndicator.SetActive(show);
+            isPlayingAudio = show;
+        }
+        
+        if (audioStatusText != null)
+        {
+            audioStatusText.text = show ? "AI Speaking..." : "";
+        }
+    }
+    
+    // Transcript Display
+    public void ShowTranscript(string transcript)
+    {
+        if (transcriptText != null && !string.IsNullOrEmpty(transcript))
+        {
+            transcriptText.text = $"You said: \"{transcript}\"";
+            
+            if (transcriptPanel != null)
+            {
+                transcriptPanel.SetActive(true);
+                StartCoroutine(HideTranscriptAfterDelay(3f));
+            }
+        }
+        
+        LogMessage($"Transcript displayed: {transcript}");
+    }
+    
+    private IEnumerator HideTranscriptAfterDelay(float delay)
+    {
+        yield return new WaitForSeconds(delay);
+        
+        if (transcriptPanel != null)
+        {
+            transcriptPanel.SetActive(false);
+        }
+    }
+    
+    // Error Handling
+    private void OnRetryButtonClicked()
+    {
+        HideError();
+        LogMessage("Retry button clicked");
+    }
+    
+    private void OnCloseErrorButtonClicked()
+    {
+        HideError();
+        LogMessage("Close error button clicked");
+    }
+    
+    // Audio Manager Event Handlers
+    private void OnRecordingStarted()
+    {
+        LogMessage("Recording started event received");
+        SetState(ConversationState.Listening);
+    }
+    
+    private void OnRecordingStopped()
+    {
+        LogMessage("Recording stopped event received");
+        SetState(ConversationState.Processing);
+    }
+    
+    private void OnVoiceDetected()
+    {
+        LogMessage("Voice detected event received");
+        UpdateStatusText("Voice detected - Keep talking...");
+        
+        // Add visual feedback for voice detection
+        if (recordingIndicator != null)
+        {
+            StartCoroutine(PulseRecordingIndicator());
+        }
+    }
+    
+    private void OnVoiceEnded()
+    {
+        LogMessage("Voice ended event received");
+        UpdateStatusText("Voice ended - Processing...");
+    }
+    
+    private void OnAudioPlaybackCompleted()
+    {
+        LogMessage("Audio playback completed event received");
+        SetState(ConversationState.Idle);
+    }
+    
+    private void OnAudioError(string error)
+    {
+        ShowError($"Audio error: {error}");
+    }
+    
+    // Companion System Event Handlers
+    private void OnUserMessage(string message)
+    {
+        LogMessage($"User message received: {message}");
+        if (message != "[Voice Input]")
+        {
+            AddMessage(message, "user");
+        }
+    }
+    
+    private void OnAssistantResponse(string response)
+    {
+        LogMessage($"Assistant response received: {response.Substring(0, Math.Min(50, response.Length))}...");
+        AddMessage(response, "assistant");
+        SetState(ConversationState.PlayingAudio);
+    }
+    
+    private void OnSystemError(string error)
+    {
+        ShowError($"System error: {error}");
+    }
+    
+    private void OnSystemStatusChanged(bool isReady)
+    {
+        LogMessage($"System status changed: {(isReady ? "Ready" : "Not Ready")}");
+        
+        if (!isReady)
+        {
+            UpdateStatusText("System initializing...");
+            SetVoiceButtonEnabled(false);
+        }
+        else if (currentState == ConversationState.Idle)
+        {
+            UpdateStatusText("Ready - Tap to talk");
+            SetVoiceButtonEnabled(true);
+        }
+    }
+    
+    // Visual Effects
+    private IEnumerator PulseRecordingIndicator()
+    {
+        if (recordingIndicator == null) yield break;
+        
+        Image indicatorImage = recordingIndicator.GetComponent<Image>();
+        if (indicatorImage == null) yield break;
+        
+        Color originalColor = indicatorImage.color;
+        Color pulseColor = new Color(originalColor.r, originalColor.g, originalColor.b, 1f);
+        
+        float duration = 0.5f;
+        float elapsed = 0f;
+        
+        while (elapsed < duration && isRecording)
+        {
+            float progress = elapsed / duration;
+            float alpha = Mathf.Lerp(0.5f, 1f, Mathf.Sin(progress * Mathf.PI));
+            
+            indicatorImage.color = new Color(pulseColor.r, pulseColor.g, pulseColor.b, alpha);
+            
+            elapsed += Time.deltaTime;
+            yield return null;
+        }
+        
+        if (indicatorImage != null)
+        {
+            indicatorImage.color = originalColor;
+        }
+    }
+    
+    // Realtime Chat Event Handlers
+    private void OnRealtimeConnected()
+    {
+        LogMessage("Realtime chat connected");
+        UpdateStatusText("Voice chat ready - Tap to talk");
+        SetVoiceButtonEnabled(true);
+        
+        if (currentState == ConversationState.Processing)
+        {
+            SetState(ConversationState.Idle);
+        }
+    }
+    
+    private void OnRealtimeDisconnected()
+    {
+        LogMessage("Realtime chat disconnected");
+        UpdateStatusText("Voice chat disconnected");
+        
+        if (currentState == ConversationState.Listening || currentState == ConversationState.PlayingAudio)
+        {
+            SetState(ConversationState.Error);
+        }
+    }
+    
+    private void OnTranscriptReceived(string transcript)
+    {
+        LogMessage($"Transcript received: {transcript}");
+        ShowTranscript(transcript);
+        
+        // The transcript is already added to chat by the realtime chat component
+        // We just need to update the UI state
+        if (currentState == ConversationState.Processing)
+        {
+            SetState(ConversationState.Responding);
+        }
+    }
+    
+    private void OnAIResponseReceived(string response)
+    {
+        LogMessage($"AI response received: {response.Substring(0, Math.Min(50, response.Length))}...");
+        
+        // The response is already added to chat by the realtime chat component
+        // We just need to update the UI state
+        if (currentState == ConversationState.Responding)
+        {
+            SetState(ConversationState.PlayingAudio);
+        }
+    }
+    
+    private void OnRealtimeError(string error)
+    {
+        LogError($"Realtime chat error: {error}");
+        ShowError($"Voice chat error: {error}");
     }
     
     // Public getters
@@ -500,4 +1106,8 @@ public class MobileCompanionUI : MonoBehaviour
     public int MessageCount => messageObjects.Count;
     public bool IsVoiceInputEnabled => enableVoiceInput;
     public bool IsHapticFeedbackEnabled => enableHapticFeedback;
+    public bool IsRecording => isRecording;
+    public bool IsProcessing => isProcessing;
+    public bool IsPlayingAudio => isPlayingAudio;
+    public ConversationState CurrentState => currentState;
 }

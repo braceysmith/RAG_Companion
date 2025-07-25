@@ -523,10 +523,71 @@ public class MobileRAGCompanionSystem : MonoBehaviour
         }
     }
     
-    private void HandleAudioRecorded(byte[] audioData)
+    private async void HandleAudioRecorded(byte[] audioData)
     {
-        // Process audio input (would integrate with speech-to-text)
-        LogMessage("Audio recorded - processing...");
+        LogMessage("Audio recorded - processing with hybrid RAG...");
+        
+        try
+        {
+            if (!isSystemReady)
+            {
+                LogError("System not ready - cannot process voice input");
+                return;
+            }
+            
+            isProcessingRequest = true;
+            OnUserMessage?.Invoke("[Voice Input]");
+            
+            // Process voice through hybrid RAG system
+            var voiceResponse = await ragClient.ProcessVoiceQuery(audioData, userId);
+            
+            if (voiceResponse != null)
+            {
+                LogMessage($"Voice processing complete - Response: {voiceResponse.response_text}");
+                LogMessage($"Source: {voiceResponse.source}, Sensitivity: {voiceResponse.sensitivity}");
+                
+                // Store conversation in cache
+                if (conversationCache != null)
+                {
+                    await conversationCache.StoreConversationAsync(userId, voiceResponse.transcript, voiceResponse.response_text, null);
+                }
+                
+                // Invoke response events
+                OnAssistantResponse?.Invoke(voiceResponse.response_text);
+                
+                // Add to UI
+                if (mobileUI != null)
+                {
+                    mobileUI.AddMessage(voiceResponse.transcript, "user");
+                    mobileUI.AddMessage(voiceResponse.response_text, "assistant");
+                    mobileUI.ShowTypingIndicator(false);
+                }
+                
+                // Play audio response if available
+                if (!string.IsNullOrEmpty(voiceResponse.audio_response) && audioManager != null)
+                {
+                    byte[] audioResponseData = System.Convert.FromBase64String(voiceResponse.audio_response);
+                    StartCoroutine(audioManager.PlayAudioFromBytes(audioResponseData));
+                }
+                
+                totalInteractions++;
+            }
+            else
+            {
+                LogError("Voice processing returned null response");
+                OnError?.Invoke("Voice processing failed");
+            }
+        }
+        catch (Exception ex)
+        {
+            LogError($"Voice processing failed: {ex.Message}");
+            OnError?.Invoke($"Voice processing failed: {ex.Message}");
+        }
+        finally
+        {
+            isProcessingRequest = false;
+            ProcessNextQueuedMessage();
+        }
     }
     
     private void HandleAudioPlaybackCompleted()
@@ -653,6 +714,53 @@ public class MobileRAGCompanionSystem : MonoBehaviour
         }
     }
     
+    // Voice control methods
+    public void StartVoiceRecording()
+    {
+        if (audioManager != null && !audioManager.IsRecording)
+        {
+            audioManager.StartRecording();
+            LogMessage("Voice recording started");
+        }
+        else
+        {
+            LogMessage("Cannot start voice recording - audio manager not available or already recording");
+        }
+    }
+    
+    public void StopVoiceRecording()
+    {
+        if (audioManager != null && audioManager.IsRecording)
+        {
+            audioManager.StopRecording();
+            LogMessage("Voice recording stopped");
+        }
+        else
+        {
+            LogMessage("Cannot stop voice recording - audio manager not available or not recording");
+        }
+    }
+    
+    public bool ProcessVoiceInputAsync(byte[] audioData)
+    {
+        if (!isSystemReady || audioData == null || audioData.Length == 0)
+        {
+            LogError("Cannot process voice input - system not ready or invalid audio data");
+            return false;
+        }
+        
+        try
+        {
+            HandleAudioRecorded(audioData);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            LogError($"Voice input processing failed: {ex.Message}");
+            return false;
+        }
+    }
+    
     // Public getters for monitoring
     public bool IsSystemReady => isSystemReady;
     public bool IsProcessingRequest => isProcessingRequest;
@@ -665,4 +773,6 @@ public class MobileRAGCompanionSystem : MonoBehaviour
     public float SystemUptime => Time.time - systemStartTime;
     public int CachedConversations => conversationCache?.TotalCachedConversations ?? 0;
     public float CacheHitRate => ragClient?.CacheSize > 0 ? (float)ragClient.CachedRequests / ragClient.TotalRequests : 0f;
+    public bool IsVoiceRecording => audioManager?.IsRecording ?? false;
+    public bool IsPlayingAudio => audioManager?.IsPlaying ?? false;
 }

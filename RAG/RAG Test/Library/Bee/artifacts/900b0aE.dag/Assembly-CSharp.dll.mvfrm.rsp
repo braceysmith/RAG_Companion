@@ -6,6 +6,7 @@ Library/Bee/artifacts/mvdfrm/Unity.Burst.Editor.ref.dll_A05E89C8C71DDB66.mvfrm
 Library/Bee/artifacts/mvdfrm/Unity.Burst.ref.dll_A8E5747B23D134FB.mvfrm
 Library/Bee/artifacts/mvdfrm/Unity.Collections.Editor.ref.dll_0F6C67C09D3B6031.mvfrm
 Library/Bee/artifacts/mvdfrm/Unity.Collections.ref.dll_E2EA4676C2271F80.mvfrm
+Library/Bee/artifacts/mvdfrm/Unity.EditorCoroutines.Editor.ref.dll_44B23014301201CE.mvfrm
 Library/Bee/artifacts/mvdfrm/Unity.InputSystem.ForUI.ref.dll_40741C90D384E043.mvfrm
 Library/Bee/artifacts/mvdfrm/Unity.InputSystem.ref.dll_7AAB9AE1EF926134.mvfrm
 Library/Bee/artifacts/mvdfrm/Unity.Mathematics.Editor.ref.dll_C54418FC61DECAC0.mvfrm
@@ -44,6 +45,8 @@ Library/Bee/artifacts/mvdfrm/Unity.VisualScripting.Shared.Editor.ref.dll_FC9237B
 Library/Bee/artifacts/mvdfrm/Unity.VisualScripting.State.Editor.ref.dll_C13AB9B8D4557B0C.mvfrm
 Library/Bee/artifacts/mvdfrm/Unity.VisualScripting.State.ref.dll_695E51A145AA52F5.mvfrm
 Library/Bee/artifacts/mvdfrm/Unity.VisualStudio.Editor.ref.dll_CFFC789CDF177EE0.mvfrm
+Library/Bee/artifacts/mvdfrm/Unity.WebRTC.Editor.ref.dll_D10452B422AB06F9.mvfrm
+Library/Bee/artifacts/mvdfrm/Unity.WebRTC.ref.dll_1A6FA618BF79AC38.mvfrm
 Library/Bee/artifacts/mvdfrm/UnityEditor.UI.ref.dll_6A0DDEC5ED23C452.mvfrm
 Library/Bee/artifacts/mvdfrm/UnityEngine.UI.ref.dll_2673B520F345ECBD.mvfrm
 Library/Bee/artifacts/mvdfrm/Unity.Android.Gradle.dll_AF6BBD745E3518B1.mvfrm

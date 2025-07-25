@@ -2,6 +2,7 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.Networking;
 
 public class MobileAudioManager : MonoBehaviour
 {
@@ -26,7 +27,7 @@ public class MobileAudioManager : MonoBehaviour
     // Recording state
     private bool isRecording = false;
     private bool isPlaying = false;
-    private AudioClip recordedClip;
+    private AudioClip _recordedClip;
     private string microphoneDevice;
     private float recordingStartTime;
     
@@ -162,9 +163,9 @@ public class MobileAudioManager : MonoBehaviour
         try
         {
             // Start microphone recording
-            recordedClip = Microphone.Start(microphoneDevice, false, maxRecordingLength, sampleRate);
+            _recordedClip = Microphone.Start(microphoneDevice, false, maxRecordingLength, sampleRate);
             
-            if (recordedClip == null)
+            if (_recordedClip == null)
             {
                 LogError("Failed to start microphone recording");
                 OnError?.Invoke("Failed to start microphone recording");
@@ -206,7 +207,7 @@ public class MobileAudioManager : MonoBehaviour
             isRecording = false;
             
             // Process recorded audio
-            if (recordedClip != null)
+            if (_recordedClip != null)
             {
                 ProcessRecordedAudio();
             }
@@ -226,8 +227,8 @@ public class MobileAudioManager : MonoBehaviour
         try
         {
             // Get audio samples
-            float[] samples = new float[recordedClip.samples * recordedClip.channels];
-            recordedClip.GetData(samples, 0);
+            float[] samples = new float[_recordedClip.samples * _recordedClip.channels];
+            _recordedClip.GetData(samples, 0);
             
             // Apply noise reduction if enabled
             if (enableNoiseReduction)
@@ -291,7 +292,7 @@ public class MobileAudioManager : MonoBehaviour
         {
             yield return new WaitForSeconds(0.1f); // Check every 100ms
             
-            if (recordedClip != null)
+            if (_recordedClip != null)
             {
                 // Get current audio level
                 float[] samples = new float[bufferSize];
@@ -299,7 +300,7 @@ public class MobileAudioManager : MonoBehaviour
                 
                 if (microphonePos > bufferSize)
                 {
-                    recordedClip.GetData(samples, microphonePos - bufferSize);
+                    _recordedClip.GetData(samples, microphonePos - bufferSize);
                     
                     // Calculate audio level
                     float audioLevel = CalculateAudioLevel(samples);
@@ -486,4 +487,83 @@ public class MobileAudioManager : MonoBehaviour
     public float RecordingDuration => isRecording ? Time.time - recordingStartTime : 0f;
     public string MicrophoneDevice => microphoneDevice;
     public int CurrentSampleRate => sampleRate;
+    public AudioClip recordedClip => _recordedClip;
+    
+    // Voice processing methods for hybrid RAG
+    public byte[] ConvertAudioClipToWAV(AudioClip clip)
+    {
+        var samples = new float[clip.samples * clip.channels];
+        clip.GetData(samples, 0);
+        
+        return ConvertSamplesToWAV(samples, clip.frequency, clip.channels);
+    }
+
+    private byte[] ConvertSamplesToWAV(float[] samples, int frequency, int channels)
+    {
+        var sampleCount = samples.Length;
+        var byteCount = sampleCount * 2; // 16-bit
+        var totalSize = byteCount + 44; // WAV header is 44 bytes
+        
+        var bytes = new byte[totalSize];
+        
+        // WAV header
+        System.Array.Copy(System.Text.Encoding.ASCII.GetBytes("RIFF"), 0, bytes, 0, 4);
+        System.Array.Copy(System.BitConverter.GetBytes(totalSize - 8), 0, bytes, 4, 4);
+        System.Array.Copy(System.Text.Encoding.ASCII.GetBytes("WAVE"), 0, bytes, 8, 4);
+        System.Array.Copy(System.Text.Encoding.ASCII.GetBytes("fmt "), 0, bytes, 12, 4);
+        System.Array.Copy(System.BitConverter.GetBytes(16), 0, bytes, 16, 4); // PCM
+        System.Array.Copy(System.BitConverter.GetBytes((short)1), 0, bytes, 20, 2); // Format
+        System.Array.Copy(System.BitConverter.GetBytes((short)channels), 0, bytes, 22, 2);
+        System.Array.Copy(System.BitConverter.GetBytes(frequency), 0, bytes, 24, 4);
+        System.Array.Copy(System.BitConverter.GetBytes(frequency * channels * 2), 0, bytes, 28, 4);
+        System.Array.Copy(System.BitConverter.GetBytes((short)(channels * 2)), 0, bytes, 32, 2);
+        System.Array.Copy(System.BitConverter.GetBytes((short)16), 0, bytes, 34, 2);
+        System.Array.Copy(System.Text.Encoding.ASCII.GetBytes("data"), 0, bytes, 36, 4);
+        System.Array.Copy(System.BitConverter.GetBytes(byteCount), 0, bytes, 40, 4);
+        
+        // Convert samples to 16-bit PCM
+        for (int i = 0; i < sampleCount; i++)
+        {
+            var sample = Mathf.Clamp(samples[i], -1f, 1f);
+            var intSample = (short)(sample * short.MaxValue);
+            var sampleBytes = System.BitConverter.GetBytes(intSample);
+            System.Array.Copy(sampleBytes, 0, bytes, 44 + i * 2, 2);
+        }
+        
+        return bytes;
+    }
+
+    public IEnumerator PlayAudioFromBytes(byte[] audioData, AudioType audioType = AudioType.MPEG)
+    {
+        // Save to temporary file
+        string tempPath = System.IO.Path.Combine(Application.temporaryCachePath, $"response.{(audioType == AudioType.MPEG ? "mp3" : "wav")}");
+        System.IO.File.WriteAllBytes(tempPath, audioData);
+        
+        // Load and play
+        using (UnityWebRequest www = UnityWebRequestMultimedia.GetAudioClip($"file://{tempPath}", audioType))
+        {
+            yield return www.SendWebRequest();
+            
+            if (www.result == UnityWebRequest.Result.Success)
+            {
+                AudioClip clip = DownloadHandlerAudioClip.GetContent(www);
+                audioSource.clip = clip;
+                audioSource.Play();
+                
+                LogMessage("Playing AI audio response");
+                OnAudioPlaybackCompleted?.Invoke();
+                
+                // Wait for playback to complete
+                yield return new WaitForSeconds(clip.length);
+            }
+            else
+            {
+                LogError($"Failed to load audio: {www.error}");
+            }
+        }
+        
+        // Clean up temp file
+        if (System.IO.File.Exists(tempPath))
+            System.IO.File.Delete(tempPath);
+    }
 }

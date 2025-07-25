@@ -78,6 +78,11 @@ class MemoryQueryRequest(BaseModel):
     memory_types: Optional[List[str]] = None
     top_k: int = 3
 
+class RealtimeSessionRequest(BaseModel):
+    user_id: str
+    model: str = "gpt-4o-realtime-preview-2024-10-01"
+    instructions: Optional[str] = None
+
 class MemoryResult(BaseModel):
     memory_id: str
     memory_type: str
@@ -298,6 +303,49 @@ async def mobile_voice_endpoint(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Mobile voice processing failed: {str(e)}")
 
+@app.post("/realtime/session", response_model=dict)
+async def create_realtime_session(request: RealtimeSessionRequest):
+    """Create OpenAI Realtime API session and return ephemeral key for mobile WebRTC"""
+    try:
+        import requests
+        
+        # Create realtime session with OpenAI
+        session_payload = {
+            "model": request.model,
+            "instructions": request.instructions or "You are a helpful AI assistant."
+        }
+        
+        headers = {
+            "Authorization": f"Bearer {os.getenv('OPENAI_API_KEY')}",
+            "Content-Type": "application/json"
+        }
+        
+        response = requests.post(
+            "https://api.openai.com/v1/realtime/sessions",
+            json=session_payload,
+            headers=headers,
+            timeout=15
+        )
+        
+        if response.status_code == 200:
+            session_data = response.json()
+            ephemeral_key = session_data["client_secret"]["value"]
+            
+            return {
+                "ephemeral_key": ephemeral_key,
+                "user_id": request.user_id,
+                "model": request.model,
+                "status": "success"
+            }
+        else:
+            raise HTTPException(
+                status_code=response.status_code, 
+                detail=f"OpenAI session creation failed: {response.text}"
+            )
+            
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Realtime session creation failed: {str(e)}")
+
 def extract_personal_info(message: str) -> dict:
     """Extract personal information from user messages"""
     personal_info = {}
@@ -487,7 +535,7 @@ Key behaviors:
         ]
         
         response = client.chat.completions.create(
-            model="gpt-4o-mini-realtime-preview",
+            model="gpt-4o-realtime-preview-2024-10-01",
             messages=messages,
             max_tokens=400,
             temperature=0.8  # More creative for conversation
@@ -958,7 +1006,7 @@ If asked about my memory capabilities, I should explain these features. For well
         ]
         
         response = client.chat.completions.create(
-            model="gpt-4o-mini-realtime-preview",
+            model="gpt-4o-realtime-preview-2024-10-01",
             messages=messages,
             max_tokens=500,
             temperature=0.7

@@ -34,6 +34,19 @@ public class MobileMemoryRequest
     public Dictionary<string, object> metadata = new Dictionary<string, object>();
 }
 
+[System.Serializable]
+public class MobileVoiceResponse
+{
+    public string transcript;
+    public string response_text;
+    public string audio_response;
+    public string source;           // "local" or "cloud"
+    public string sensitivity;      // "personal", "private", "general"
+    public object tool_results;
+    public object personal_info_extracted;
+    public string status;
+}
+
 public class MobileRAGClient : MonoBehaviour
 {
     [Header("Cloud Configuration")]
@@ -205,6 +218,43 @@ public class MobileRAGClient : MonoBehaviour
             }
             
             return new List<RAGResult>();
+        }
+    }
+    
+    public async Task<MobileVoiceResponse> ProcessVoiceQuery(byte[] audioData, string userId, string audioFormat = "wav")
+    {
+        string endpoint = $"{cloudApiUrl}/mobile/voice";
+        
+        WWWForm form = new WWWForm();
+        form.AddBinaryData("audio", audioData, $"voice.{audioFormat}", $"audio/{audioFormat}");
+        form.AddField("user_id", userId);
+        form.AddField("audio_format", audioFormat);
+        
+        using (UnityWebRequest request = UnityWebRequest.Post(endpoint, form))
+        {
+            request.timeout = requestTimeoutSeconds;
+            
+            // Add auth token if available
+            string authToken = authManager.GetAuthTokenAsync();
+            if (!string.IsNullOrEmpty(authToken))
+            {
+                request.SetRequestHeader("Authorization", $"Bearer {authToken}");
+            }
+            
+            await request.SendWebRequest();
+            
+            if (request.result == UnityWebRequest.Result.Success)
+            {
+                string jsonResponse = request.downloadHandler.text;
+                totalRequests++;
+                successfulRequests++;
+                return JsonConvert.DeserializeObject<MobileVoiceResponse>(jsonResponse);
+            }
+            else
+            {
+                LogError($"Voice request failed: {request.error}");
+                throw new Exception($"Voice request failed: {request.error}");
+            }
         }
     }
     
