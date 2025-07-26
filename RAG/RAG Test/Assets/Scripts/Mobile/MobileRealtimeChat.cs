@@ -49,6 +49,7 @@ public class MobileRealtimeChat : MonoBehaviour
     
     // Audio transcript tracking
     private StringBuilder currentTranscript = new StringBuilder();
+    private StringBuilder currentAITranscript;
     
     // Audio streaming
     private Coroutine audioStreamingCoroutine;
@@ -92,23 +93,32 @@ public class MobileRealtimeChat : MonoBehaviour
             LogError("RAG context is enabled but no MobileRAGClient found! Memory will not work.");
         }
         
-        // Check RAG API URL configuration
+        // Check and sync RAG API URL configuration
         if (enableRAGContext && ragClient != null)
         {
-            // Try to sync the API URLs
+            // First, try to sync URLs if realtime URL is configured
+            if (!IsPlaceholderUrl(ragApiUrl))
+            {
+                LogMessage($"Configuring RAG Client with Railway URL: {ragApiUrl}");
+                ragClient.SetCloudApiUrl(ragApiUrl);
+            }
+            
+            // Verify configuration
             var ragClientApiUrl = ragClient.GetType().GetField("cloudApiUrl", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
             if (ragClientApiUrl != null)
             {
                 string currentUrl = ragClientApiUrl.GetValue(ragClient) as string;
                 LogMessage($"RAG Client API URL: {currentUrl}");
                 
-                if (currentUrl == "https://your-rag-api.com" || string.IsNullOrEmpty(currentUrl))
+                if (IsPlaceholderUrl(currentUrl))
                 {
-                    LogError("RAG Client API URL is not configured! Set it to your Railway server URL in the inspector.");
+                    LogError("🚨 CONFIGURATION REQUIRED: Set your Railway server URL in MobileRealtimeChat.ragApiUrl to enable RAG memory!");
+                    LogError("Example: https://your-app-name.up.railway.app");
+                    LogError("RAG memory storage and recall will NOT work until this is configured.");
                 }
-                else if (currentUrl != ragApiUrl)
+                else
                 {
-                    LogMessage($"RAG Client URL ({currentUrl}) differs from realtime URL ({ragApiUrl}). This might cause issues.");
+                    LogMessage("✅ RAG Client configured with Railway server URL - memory should work!");
                 }
             }
         }
@@ -155,6 +165,15 @@ public class MobileRealtimeChat : MonoBehaviour
         }
         
         LogMessage("Starting realtime session via Railway server...");
+        
+        // Debug RAG status before starting session
+        LogMessage($"=== RAG STATUS CHECK ===");
+        LogMessage($"RAG Context Enabled: {enableRAGContext}");
+        LogMessage($"RAG Client Available: {ragClient != null}");
+        LogMessage($"RAG API URL: {ragApiUrl}");
+        LogMessage($"User ID: {userId}");
+        LogMessage($"=== END RAG STATUS ===");
+        
         StartCoroutine(CreateSessionAndConnect());
     }
     
@@ -670,9 +689,18 @@ public class MobileRealtimeChat : MonoBehaviour
                     break;
                     
                 case "response.audio.delta":
-                case "response.audio_transcript.delta":
                     // Handle audio response deltas
                     HandleAudioResponseDelta(jo);
+                    break;
+                    
+                case "response.audio_transcript.delta":
+                    // Handle audio transcript deltas (this is what was actually spoken)
+                    HandleAudioTranscriptDelta(jo);
+                    break;
+                    
+                case "response.audio_transcript.done":
+                    // Handle completed audio transcript
+                    HandleAudioTranscriptDone(jo);
                     break;
                     
                 case "response.output_item.done":
@@ -854,17 +882,17 @@ public class MobileRealtimeChat : MonoBehaviour
         var text = ExtractTextFromMessage(message);
         if (!string.IsNullOrEmpty(text))
         {
-            LogMessage($"Text response: {text.Substring(0, Math.Min(50, text.Length))}...");
+            LogMessage($"Text response (may differ from audio): {text.Substring(0, Math.Min(50, text.Length))}...");
             OnAIResponseReceived?.Invoke(text);
             
-            // Store AI response in RAG memory
-            StoreAIResponse(text);
+            // Don't store text response - wait for audio transcript instead
+            // The audio transcript (what was actually spoken) will be stored in HandleAudioTranscriptDone
             
             // Update UI - switch from processing to responding
             if (companionUI != null)
             {
                 companionUI.ShowProcessingIndicator(false);
-                companionUI.AddMessage(text, "assistant");
+                // Don't add text message here - wait for audio transcript
                 
                 // If we weren't already responding, start now
                 if (!isAIResponding)
@@ -924,31 +952,49 @@ public class MobileRealtimeChat : MonoBehaviour
         // Query for recent conversation context with the user's current input if available
         string currentContext = currentTranscript.Length > 0 ? currentTranscript.ToString() : "conversation memory and personal information";
         
-        var queryTask = System.Threading.Tasks.Task.Run(async () =>
-        {
-            try
-            {
-                // Use current context for more relevant retrieval
-                var results = await ragClient.QueryAsync(currentContext, userId, maxRAGResults);
-                LogMessage($"RAG query for '{currentContext}' returned {results?.Count ?? 0} results");
-                return results ?? new List<RAGResult>();
-            }
-            catch (System.Exception ex)
-            {
-                LogError($"Failed to query RAG context: {ex.Message}");
-                return new List<RAGResult>();
-            }
-        });
+        List<RAGResult> ragResults = new List<RAGResult>();
+        bool queryCompleted = false;
         
-        // Wait for task completion
-        while (!queryTask.IsCompleted)
+        // Start the async query using a coroutine wrapper to stay on main thread
+        StartCoroutine(QueryRAGAsyncWrapper(currentContext, userId, maxRAGResults, (results) =>
+        {
+            ragResults = results ?? new List<RAGResult>();
+            queryCompleted = true;
+            LogMessage($"RAG query for '{currentContext}' returned {ragResults.Count} results");
+        }));
+        
+        // Wait for query completion
+        while (!queryCompleted)
         {
             yield return null;
         }
         
         // Build enhanced instructions with RAG context
-        string enhancedInstructions = BuildEnhancedInstructions(queryTask.Result);
+        string enhancedInstructions = BuildEnhancedInstructions(ragResults);
         callback?.Invoke(enhancedInstructions);
+    }
+    
+    private IEnumerator QueryRAGAsyncWrapper(string query, string userId, int maxResults, System.Action<List<RAGResult>> callback)
+    {
+        // Convert async call to coroutine to avoid threading issues
+        var queryTask = ragClient.QueryAsync(query, userId, maxResults);
+        
+        // Wait for task completion without using Task.Run (stays on main thread)
+        while (!queryTask.IsCompleted)
+        {
+            yield return null;
+        }
+        
+        try
+        {
+            var results = queryTask.Result;
+            callback?.Invoke(results);
+        }
+        catch (System.Exception ex)
+        {
+            LogError($"Failed to query RAG context: {ex.Message}");
+            callback?.Invoke(new List<RAGResult>());
+        }
     }
     
     private string BuildEnhancedInstructions(List<RAGResult> ragResults)
@@ -1395,6 +1441,42 @@ public class MobileRealtimeChat : MonoBehaviour
         isAIResponding = false;
     }
     
+    private void HandleAudioTranscriptDelta(JObject message)
+    {
+        var transcript = message["delta"]?.ToString();
+        if (!string.IsNullOrEmpty(transcript))
+        {
+            LogMessage($"Audio transcript delta: {transcript}");
+            // Accumulate the actual spoken text
+            if (currentAITranscript == null)
+            {
+                currentAITranscript = new StringBuilder();
+            }
+            currentAITranscript.Append(transcript);
+        }
+    }
+    
+    private void HandleAudioTranscriptDone(JObject message)
+    {
+        var transcript = message["transcript"]?.ToString();
+        if (!string.IsNullOrEmpty(transcript))
+        {
+            LogMessage($"Complete audio transcript (what AI actually said): {transcript}");
+            
+            // Store the actual spoken response instead of the text response
+            StoreAIResponse(transcript);
+            
+            // Update UI with what was actually spoken
+            if (companionUI != null)
+            {
+                // Clear any previous text response and show the actual spoken version
+                companionUI.AddMessage(transcript, "assistant");
+            }
+            
+            currentAITranscript?.Clear();
+        }
+    }
+    
     // RAG Memory Storage Methods
     private void StoreUserMessage(string message)
     {
@@ -1463,30 +1545,25 @@ public class MobileRealtimeChat : MonoBehaviour
             ["session_id"] = System.Guid.NewGuid().ToString()
         };
         
-        // Use Task.Run to avoid blocking the main thread
-        var storeTask = System.Threading.Tasks.Task.Run(async () =>
-        {
-            try
-            {
-                await ragClient.StoreMemoryAsync(userId, "conversation", message, metadata);
-                return true;
-            }
-            catch (System.Exception ex)
-            {
-                LogError($"Failed to store user message: {ex.Message}");
-                return false;
-            }
-        });
+        // Call async method directly on main thread
+        var storeTask = ragClient.StoreMemoryAsync(userId, "conversation", message, metadata);
         
-        // Wait for task completion in a coroutine-friendly way
+        // Wait for task completion without Task.Run (stays on main thread)
         while (!storeTask.IsCompleted)
         {
             yield return null;
         }
         
-        if (storeTask.Result)
+        try
         {
-            LogMessage("User message stored successfully in RAG");
+            if (storeTask.Result)
+            {
+                LogMessage("User message stored successfully in RAG");
+            }
+        }
+        catch (System.Exception ex)
+        {
+            LogError($"Failed to store user message: {ex.Message}");
         }
     }
     
@@ -1505,30 +1582,25 @@ public class MobileRealtimeChat : MonoBehaviour
             ["session_id"] = System.Guid.NewGuid().ToString()
         };
         
-        // Use Task.Run to avoid blocking the main thread
-        var storeTask = System.Threading.Tasks.Task.Run(async () =>
-        {
-            try
-            {
-                await ragClient.StoreMemoryAsync(userId, "conversation", response, metadata);
-                return true;
-            }
-            catch (System.Exception ex)
-            {
-                LogError($"Failed to store AI response: {ex.Message}");
-                return false;
-            }
-        });
+        // Call async method directly on main thread
+        var storeTask = ragClient.StoreMemoryAsync(userId, "conversation", response, metadata);
         
-        // Wait for task completion in a coroutine-friendly way
+        // Wait for task completion without Task.Run (stays on main thread)
         while (!storeTask.IsCompleted)
         {
             yield return null;
         }
         
-        if (storeTask.Result)
+        try
         {
-            LogMessage("AI response stored successfully in RAG");
+            if (storeTask.Result)
+            {
+                LogMessage("AI response stored successfully in RAG");
+            }
+        }
+        catch (System.Exception ex)
+        {
+            LogError($"Failed to store AI response: {ex.Message}");
         }
     }
     
@@ -1710,6 +1782,16 @@ public class MobileRealtimeChat : MonoBehaviour
     private void LogError(string message)
     {
         Debug.LogError($"[MobileRealtimeChat] {message}");
+    }
+    
+    private bool IsPlaceholderUrl(string url)
+    {
+        if (string.IsNullOrEmpty(url)) return true;
+        
+        return url == "https://your-rag-api.com" || 
+               url == "https://your-rag-api.up.railway.app" ||
+               url.Contains("your-rag-api") ||
+               url.Contains("your-app-name");
     }
     
     // Audio testing and debugging

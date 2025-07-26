@@ -13,7 +13,7 @@ class RAGDatabase:
     async def initialize(self):
         """Initialize database with required tables and extensions"""
         async with await psycopg.AsyncConnection.connect(self.db_url) as conn:
-            await register_vector(conn)
+            register_vector(conn)
             async with conn.cursor() as cur:
                 # Create extension
                 await cur.execute("CREATE EXTENSION IF NOT EXISTS vector")
@@ -96,7 +96,7 @@ class RAGDatabase:
     async def upsert_chunks(self, chunks: List[Dict[str, Any]]):
         """Insert or update chunks in the database"""
         async with await psycopg.AsyncConnection.connect(self.db_url) as conn:
-            await register_vector(conn)
+            register_vector(conn)
             async with conn.cursor() as cur:
                 for chunk in chunks:
                     await cur.execute("""
@@ -124,7 +124,7 @@ class RAGDatabase:
                           user_scopes: List[str] = None, safety_levels: List[str] = None):
         """Search for similar chunks using vector similarity"""
         async with await psycopg.AsyncConnection.connect(self.db_url) as conn:
-            await register_vector(conn)
+            register_vector(conn)
             async with conn.cursor() as cur:
                 # Build WHERE clause
                 where_conditions = []
@@ -169,7 +169,7 @@ class RAGDatabase:
                                content: str, embedding: List[float], metadata: Dict = None):
         """Insert or update user memory"""
         async with await psycopg.AsyncConnection.connect(self.db_url) as conn:
-            await register_vector(conn)
+            register_vector(conn)
             async with conn.cursor() as cur:
                 memory_id = f"{user_id}_{memory_type}_{hash(content)}"
                 await cur.execute("""
@@ -196,7 +196,7 @@ class RAGDatabase:
                                memory_types: List[str] = None, top_k: int = 3):
         """Search user memory using vector similarity"""
         async with await psycopg.AsyncConnection.connect(self.db_url) as conn:
-            await register_vector(conn)
+            register_vector(conn)
             async with conn.cursor() as cur:
                 where_conditions = ["user_id = %(user_id)s"]
                 params = {"user_id": user_id, "embedding": query_embedding, "top_k": top_k}

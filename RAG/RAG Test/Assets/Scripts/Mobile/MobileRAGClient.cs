@@ -459,7 +459,11 @@ public class MobileRAGClient : MonoBehaviour
                 }
                 else
                 {
+                    string responseText = webRequest.downloadHandler?.text ?? "No response body";
                     LogError($"Memory storage failed: {webRequest.error}");
+                    LogError($"Server response: {responseText}");
+                    LogError($"Request URL: {webRequest.url}");
+                    LogError($"Request payload: {jsonPayload}");
                     return false;
                 }
             }
