@@ -510,10 +510,11 @@ async def generate_conversational_response(user_id: str, query: str, personal_in
         conversation_context = get_conversation_context(user_id)
         
         # Debug: Log what we're retrieving
-        print(f"🔍 Generating response for user_id: {user_id}")
+        print(f"🔍 Generating response for user_id: '{user_id}'")
         print(f"🔍 Retrieved user_profile: {user_profile}")
         print(f"🔍 All stored profiles: {user_profiles}")
         print(f"🔍 Personal info from this message: {personal_info}")
+        print(f"🔍 Available user_ids in profiles: {list(user_profiles.keys())}")
         
         # Check if user is asking for something that needs a tool
         tool_result = await check_and_use_tools(query, user_profile)
@@ -717,7 +718,9 @@ def rag_query_sync(request: dict):
                     })
             
             # Generate conversational response (RAG or personal AI response)
+            print(f"🔍 /query endpoint: results={len(results)}, not results={not results}")
             if not results:
+                print(f"🔍 Calling generate_conversational_response for user_id: {user_id}")
                 # Generate fluid conversational response with tool support
                 import asyncio
                 loop = asyncio.new_event_loop()
@@ -726,6 +729,7 @@ def rag_query_sync(request: dict):
                     generate_conversational_response(user_id, query_text, personal_info)
                 )
                 loop.close()
+                print(f"🔍 Generated response: {response_text[:100]}...")
                 
                 results = [
                     {
