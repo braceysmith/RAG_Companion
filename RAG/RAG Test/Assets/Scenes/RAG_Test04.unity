@@ -1693,7 +1693,7 @@ MonoBehaviour:
   iceServers: stun:stun.l.google.com:19302,stun:stun1.l.google.com:19302
   ragApiUrl: https://ragcompanion-production.up.railway.app
   userId: mobile-bracey01
-  enableRAGContext: 0
+  enableRAGContext: 1
   maxRAGResults: 3
 --- !u!1 &863663166
 GameObject:
