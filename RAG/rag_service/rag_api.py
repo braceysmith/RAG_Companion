@@ -400,7 +400,15 @@ def extract_personal_info(message: str) -> dict:
                         personal_info[info_type] = value.title()
                 else:
                     # For other info, take a few words
-                    value = " ".join(rest[:3]).strip('.,!?')
+                    if info_type == "location":
+                        # For location, just take first word or two, stop at punctuation
+                        value = rest[0].strip('.,!?')
+                        # Add second word if it's a common state/location continuation
+                        if len(rest) > 1 and rest[1].lower() in ['york', 'jersey', 'carolina', 'dakota', 'mexico']:
+                            value += " " + rest[1].strip('.,!?')
+                    else:
+                        value = " ".join(rest[:3]).strip('.,!?')
+                    
                     if len(value) > 1:
                         personal_info[info_type] = value
                 break
@@ -443,7 +451,24 @@ def store_personal_info_simple(user_id: str, info: dict):
         if user_id not in user_profiles:
             user_profiles[user_id] = {}
         
+        # Clean up existing location data if it's corrupted
+        if "location" in user_profiles[user_id]:
+            existing_location = user_profiles[user_id]["location"]
+            if ". Is there" in existing_location or ". is there" in existing_location:
+                cleaned_location = existing_location.split(".")[0].strip()
+                user_profiles[user_id]["location"] = cleaned_location
+                print(f"Cleaned existing location data: {existing_location} -> {cleaned_location}")
+        
         for key, value in info.items():
+            # Clean up location data if it contains extra text
+            if key == "location":
+                # Remove common sentence fragments
+                value = value.split(".")[0].split("?")[0].split("!")[0].strip()
+                # Clean up common conversational fragments  
+                for fragment in [" is there", " there", " here"]:
+                    if value.lower().endswith(fragment):
+                        value = value[:-len(fragment)].strip()
+            
             user_profiles[user_id][key] = value
             print(f"Stored in memory: {key} = {value} for user {user_id}")
         
@@ -540,6 +565,13 @@ Key behaviors:
             {"role": "user", "content": query}
         ]
         
+        # Debug: Print the exact system prompt being sent to the AI
+        print(f"🔍 SYSTEM PROMPT DEBUG:")
+        print(f"🔍 System content length: {len(system_content)}")
+        print(f"🔍 Full system prompt:\n{system_content}")
+        print(f"🔍 User query: {query}")
+        print(f"🔍 Messages sent to AI: {messages}")
+        
         response = client.chat.completions.create(
             model="gpt-4o-mini",  # Use chat model instead of realtime model
             messages=messages,
@@ -547,7 +579,11 @@ Key behaviors:
             temperature=0.8  # More creative for conversation
         )
         
-        return response.choices[0].message.content.strip()
+        # Debug: Print the AI's response
+        ai_response = response.choices[0].message.content.strip()
+        print(f"🔍 AI RESPONSE: {ai_response}")
+        
+        return ai_response
         
     except Exception as e:
         print(f"Conversational response generation error: {e}")
