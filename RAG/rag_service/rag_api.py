@@ -351,12 +351,10 @@ def extract_personal_info(message: str) -> dict:
     personal_info = {}
     message_lower = message.lower()
     
-    # Name detection patterns
+    # Name detection patterns - more specific
     name_patterns = [
         ("my name is ", "name"),
         ("call me ", "name"), 
-        ("i'm ", "name"),
-        ("i am ", "name"),
         ("my name's ", "name")
     ]
     
@@ -396,7 +394,9 @@ def extract_personal_info(message: str) -> dict:
             if rest:
                 if info_type == "name":
                     value = rest[0].strip('.,!?')
-                    if len(value) > 1 and value.isalpha():
+                    # Only store if it's a reasonable name (alphabetic, 2+ chars, not common words)
+                    if (len(value) > 1 and value.isalpha() and 
+                        value.lower() not in ['here', 'there', 'doing', 'going', 'glad', 'well', 'fine']):
                         personal_info[info_type] = value.title()
                 else:
                     # For other info, take a few words
@@ -744,6 +744,10 @@ async def store_memory(request: MemoryRequest):
             if personal_info:
                 store_personal_info_simple(request.user_id, personal_info)
                 print(f"Extracted and stored personal info: {personal_info}")
+                
+                # Debug: Show current user profile
+                current_profile = user_profiles.get(request.user_id, {})
+                print(f"Current profile for {request.user_id}: {current_profile}")
         
         # Always return success for now
         return {"status": "success", "message": "Memory stored successfully (in-memory)"}
