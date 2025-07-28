@@ -484,6 +484,12 @@ async def generate_conversational_response(user_id: str, query: str, personal_in
         user_profile = user_profiles.get(user_id, {})
         conversation_context = get_conversation_context(user_id)
         
+        # Debug: Log what we're retrieving
+        print(f"🔍 Generating response for user_id: {user_id}")
+        print(f"🔍 Retrieved user_profile: {user_profile}")
+        print(f"🔍 All stored profiles: {user_profiles}")
+        print(f"🔍 Personal info from this message: {personal_info}")
+        
         # Check if user is asking for something that needs a tool
         tool_result = await check_and_use_tools(query, user_profile)
         
@@ -609,6 +615,9 @@ def rag_query_sync(request: dict):
         query_text = request.get('query', '')
         user_id = request.get('user_id', 'anonymous')
         top_k = request.get('top_k', 5)
+        
+        # Debug: Log the query request details
+        print(f"📝 Query request - user_id: {user_id}, query: {query_text[:50]}...")
         
         # Check for personal information in the message and store it
         personal_info = extract_personal_info(query_text)
