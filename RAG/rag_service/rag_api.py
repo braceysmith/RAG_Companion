@@ -535,7 +535,7 @@ Key behaviors:
         ]
         
         response = client.chat.completions.create(
-            model="gpt-4o-realtime-preview-2024-10-01",
+            model="gpt-4o-mini",  # Use chat model instead of realtime model
             messages=messages,
             max_tokens=400,
             temperature=0.8  # More creative for conversation
@@ -1006,7 +1006,7 @@ If asked about my memory capabilities, I should explain these features. For well
         ]
         
         response = client.chat.completions.create(
-            model="gpt-4o-realtime-preview-2024-10-01",
+            model="gpt-4o-mini",  # Use chat model instead of realtime model
             messages=messages,
             max_tokens=500,
             temperature=0.7

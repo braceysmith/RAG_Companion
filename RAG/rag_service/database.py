@@ -13,6 +13,7 @@ class RAGDatabase:
     async def initialize(self):
         """Initialize database with required tables and extensions"""
         async with await psycopg.AsyncConnection.connect(self.db_url) as conn:
+            await conn.execute("SELECT 1")  # Ensure connection is ready
             register_vector(conn)
             async with conn.cursor() as cur:
                 # Create extension
@@ -96,6 +97,7 @@ class RAGDatabase:
     async def upsert_chunks(self, chunks: List[Dict[str, Any]]):
         """Insert or update chunks in the database"""
         async with await psycopg.AsyncConnection.connect(self.db_url) as conn:
+            await conn.execute("SELECT 1")  # Ensure connection is ready
             register_vector(conn)
             async with conn.cursor() as cur:
                 for chunk in chunks:
@@ -124,6 +126,7 @@ class RAGDatabase:
                           user_scopes: List[str] = None, safety_levels: List[str] = None):
         """Search for similar chunks using vector similarity"""
         async with await psycopg.AsyncConnection.connect(self.db_url) as conn:
+            await conn.execute("SELECT 1")  # Ensure connection is ready
             register_vector(conn)
             async with conn.cursor() as cur:
                 # Build WHERE clause
@@ -169,6 +172,7 @@ class RAGDatabase:
                                content: str, embedding: List[float], metadata: Dict = None):
         """Insert or update user memory"""
         async with await psycopg.AsyncConnection.connect(self.db_url) as conn:
+            await conn.execute("SELECT 1")  # Ensure connection is ready
             register_vector(conn)
             async with conn.cursor() as cur:
                 memory_id = f"{user_id}_{memory_type}_{hash(content)}"
@@ -196,6 +200,7 @@ class RAGDatabase:
                                memory_types: List[str] = None, top_k: int = 3):
         """Search user memory using vector similarity"""
         async with await psycopg.AsyncConnection.connect(self.db_url) as conn:
+            await conn.execute("SELECT 1")  # Ensure connection is ready
             register_vector(conn)
             async with conn.cursor() as cur:
                 where_conditions = ["user_id = %(user_id)s"]
