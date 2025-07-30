@@ -579,11 +579,20 @@ def get_due_reminders(user_id: str) -> list:
     due_reminders = []
     now = datetime.now()
     
+    print(f"🕐 Checking reminders at {now}")
+    print(f"🔍 User {user_id} has {len(user_reminders[user_id])} total reminders")
+    
     for reminder in user_reminders[user_id]:
-        if not reminder["triggered"] and reminder["datetime"] <= now:
+        reminder_time = reminder["datetime"]
+        is_due = reminder_time <= now
+        print(f"  📝 Reminder: '{reminder['content']}' due at {reminder_time}, triggered: {reminder['triggered']}, is_due: {is_due}")
+        
+        if not reminder["triggered"] and is_due:
             reminder["triggered"] = True  # Mark as triggered
             due_reminders.append(reminder)
+            print(f"  ✅ Marking reminder as due: {reminder['id']}")
     
+    print(f"📅 Found {len(due_reminders)} due reminders")
     return due_reminders
 
 def get_pending_reminders(user_id: str) -> list:
