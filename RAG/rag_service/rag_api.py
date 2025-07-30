@@ -351,6 +351,7 @@ def extract_personal_info(message: str) -> dict:
     """Extract personal information from user messages"""
     personal_info = {}
     message_lower = message.lower()
+    print(f"🔍 Checking message for patterns: '{message}'")
     
     # Name detection patterns - more specific
     name_patterns = [
@@ -401,6 +402,7 @@ def extract_personal_info(message: str) -> dict:
     
     for pattern, info_type in all_patterns:
         if pattern in message_lower:
+            print(f"🔍 Found pattern '{pattern}' -> {info_type}")
             start = message_lower.find(pattern) + len(pattern)
             # Extract relevant information
             rest = message[start:].split()
@@ -446,6 +448,8 @@ def parse_reminder_request(remainder: str, pattern_type: str) -> dict:
         # Fallback if dateutil is not available
         print("Warning: dateutil not available, using basic date parsing")
         date_parser = None
+    
+    print(f"🔍 Parsing reminder: '{remainder}' (type: {pattern_type})")
     
     reminder_data = {
         "content": "",
@@ -688,6 +692,11 @@ async def generate_conversational_response(user_id: str, query: str, personal_in
         # Check for due reminders
         due_reminders = get_due_reminders(user_id)
         pending_reminders = get_pending_reminders(user_id)
+        print(f"🔍 Reminder check - due: {len(due_reminders)}, pending: {len(pending_reminders)}")
+        if due_reminders:
+            print(f"🔔 Due reminders: {[r['content'] for r in due_reminders]}")
+        if pending_reminders:
+            print(f"⏰ Pending reminders: {[r['content'] for r in pending_reminders]}")
         
         # Debug: Log what we're retrieving
         print(f"🔍 Generating response for user_id: '{user_id}'")
@@ -860,6 +869,7 @@ def rag_query_sync(request: dict):
         
         # Check for personal information in the message and store it
         personal_info = extract_personal_info(query_text)
+        print(f"🔍 Extracted personal info: {personal_info}")
         if personal_info:
             # Handle reminder requests specially
             if "reminder_request" in personal_info:
