@@ -128,6 +128,7 @@ class TTSRequest(BaseModel):
 embedding_cache = {}
 user_profiles = {}  # Simple in-memory storage for personal info
 user_conversations = {}  # Store recent conversation history for context
+user_reminders = {}  # Store active reminders {user_id: [reminder_objects]}
 
 @app.on_event("startup")
 async def startup_event():
@@ -384,7 +385,19 @@ def extract_personal_info(message: str) -> dict:
         ("i live at ", "location")
     ]
     
-    all_patterns = name_patterns + work_patterns + interest_patterns + location_patterns
+    # Reminder patterns
+    reminder_patterns = [
+        ("remind me to ", "reminder"),
+        ("remind me at ", "reminder_at"),
+        ("remind me on ", "reminder_on"),
+        ("don't let me forget to ", "reminder"),
+        ("i need to remember to ", "reminder"),
+        ("set a reminder for ", "reminder"),
+        ("alert me to ", "reminder"),
+        ("notify me to ", "reminder")
+    ]
+    
+    all_patterns = name_patterns + work_patterns + interest_patterns + location_patterns + reminder_patterns
     
     for pattern, info_type in all_patterns:
         if pattern in message_lower:
@@ -406,6 +419,14 @@ def extract_personal_info(message: str) -> dict:
                         # Add second word if it's a common state/location continuation
                         if len(rest) > 1 and rest[1].lower() in ['york', 'jersey', 'carolina', 'dakota', 'mexico']:
                             value += " " + rest[1].strip('.,!?')
+                    elif info_type in ["reminder", "reminder_at", "reminder_on"]:
+                        # For reminders, extract the full reminder text
+                        remainder = message[start:].strip()
+                        # Extract reminder details using more sophisticated parsing
+                        reminder_data = parse_reminder_request(remainder, info_type)
+                        if reminder_data:
+                            personal_info["reminder_request"] = reminder_data
+                            continue  # Skip the normal value setting
                     else:
                         value = " ".join(rest[:3]).strip('.,!?')
                     
@@ -414,6 +435,161 @@ def extract_personal_info(message: str) -> dict:
                 break
     
     return personal_info
+
+def parse_reminder_request(remainder: str, pattern_type: str) -> dict:
+    """Parse natural language reminder requests"""
+    import re
+    from datetime import datetime, timedelta
+    try:
+        import dateutil.parser as date_parser
+    except ImportError:
+        # Fallback if dateutil is not available
+        print("Warning: dateutil not available, using basic date parsing")
+        date_parser = None
+    
+    reminder_data = {
+        "content": "",
+        "datetime": None,
+        "original_text": remainder
+    }
+    
+    try:
+        # Common time patterns
+        time_patterns = [
+            # Absolute times
+            (r"at (\d{1,2}:\d{2})\s*(am|pm)?", "time"),
+            (r"at (\d{1,2})\s*(am|pm)", "time"),
+            
+            # Relative times  
+            (r"in (\d+) (minute|hour|day|week)s?", "relative"),
+            (r"tomorrow at (\d{1,2}:\d{2})\s*(am|pm)?", "tomorrow"),
+            (r"tomorrow", "tomorrow"),
+            (r"next (monday|tuesday|wednesday|thursday|friday|saturday|sunday)", "next_day"),
+            
+            # Specific dates
+            (r"on ([a-zA-Z]+ \d{1,2})", "date"),
+            (r"on (\d{1,2}/\d{1,2})", "date"),
+            (r"(\d{1,2}/\d{1,2}/\d{2,4})", "full_date")
+        ]
+        
+        # Extract time information
+        time_found = False
+        for pattern, time_type in time_patterns:
+            match = re.search(pattern, remainder.lower())
+            if match:
+                try:
+                    if time_type == "relative":
+                        amount = int(match.group(1))
+                        unit = match.group(2)
+                        if unit.startswith("minute"):
+                            reminder_data["datetime"] = datetime.now() + timedelta(minutes=amount)
+                        elif unit.startswith("hour"):
+                            reminder_data["datetime"] = datetime.now() + timedelta(hours=amount)
+                        elif unit.startswith("day"):
+                            reminder_data["datetime"] = datetime.now() + timedelta(days=amount)
+                        elif unit.startswith("week"):
+                            reminder_data["datetime"] = datetime.now() + timedelta(weeks=amount)
+                    elif time_type == "tomorrow":
+                        time_part = match.group(1) if len(match.groups()) > 0 else "9:00 AM"
+                        tomorrow = datetime.now() + timedelta(days=1)
+                        if date_parser:
+                            reminder_data["datetime"] = date_parser.parse(f"{tomorrow.strftime('%Y-%m-%d')} {time_part}")
+                        else:
+                            # Simple fallback parsing
+                            reminder_data["datetime"] = tomorrow.replace(hour=9, minute=0, second=0, microsecond=0)
+                    else:
+                        # Try to parse the matched time/date
+                        if date_parser:
+                            reminder_data["datetime"] = date_parser.parse(match.group(0))
+                        else:
+                            # Simple fallback - default to 1 hour from now
+                            reminder_data["datetime"] = datetime.now() + timedelta(hours=1)
+                    
+                    time_found = True
+                    # Remove the time part from the content
+                    remainder = re.sub(pattern, "", remainder, flags=re.IGNORECASE).strip()
+                    break
+                except:
+                    continue
+        
+        # If no specific time found, set default reminder for 1 hour from now
+        if not time_found:
+            reminder_data["datetime"] = datetime.now() + timedelta(hours=1)
+            
+        # Clean up the reminder content
+        remainder = remainder.strip()
+        # Remove common connector words
+        remainder = re.sub(r"^(that|to|about)\s+", "", remainder, flags=re.IGNORECASE)
+        
+        reminder_data["content"] = remainder
+        
+        # Only return if we have meaningful content
+        if len(reminder_data["content"]) > 2:
+            return reminder_data
+            
+    except Exception as e:
+        print(f"Error parsing reminder: {e}")
+        
+    return None
+
+def store_reminder(user_id: str, reminder_data: dict) -> str:
+    """Store a reminder for a user"""
+    import uuid
+    from datetime import datetime
+    
+    reminder_id = str(uuid.uuid4())[:8]  # Short ID
+    
+    reminder = {
+        "id": reminder_id,
+        "content": reminder_data["content"],
+        "datetime": reminder_data["datetime"],
+        "original_text": reminder_data["original_text"],
+        "created_at": datetime.now(),
+        "triggered": False,
+        "user_id": user_id
+    }
+    
+    if user_id not in user_reminders:
+        user_reminders[user_id] = []
+    
+    user_reminders[user_id].append(reminder)
+    
+    print(f"📅 Stored reminder for {user_id}: '{reminder['content']}' at {reminder['datetime']}")
+    
+    return reminder_id
+
+def get_due_reminders(user_id: str) -> list:
+    """Get reminders that are due for a user"""
+    from datetime import datetime
+    
+    if user_id not in user_reminders:
+        return []
+    
+    due_reminders = []
+    now = datetime.now()
+    
+    for reminder in user_reminders[user_id]:
+        if not reminder["triggered"] and reminder["datetime"] <= now:
+            reminder["triggered"] = True  # Mark as triggered
+            due_reminders.append(reminder)
+    
+    return due_reminders
+
+def get_pending_reminders(user_id: str) -> list:
+    """Get all pending (future) reminders for a user"""
+    from datetime import datetime
+    
+    if user_id not in user_reminders:
+        return []
+    
+    pending_reminders = []
+    now = datetime.now()
+    
+    for reminder in user_reminders[user_id]:
+        if not reminder["triggered"] and reminder["datetime"] > now:
+            pending_reminders.append(reminder)
+    
+    return pending_reminders
 
 def store_conversation_turn(user_id: str, user_message: str, ai_response: str):
     """Store conversation turn for context"""
@@ -509,6 +685,10 @@ async def generate_conversational_response(user_id: str, query: str, personal_in
         user_profile = user_profiles.get(user_id, {})
         conversation_context = get_conversation_context(user_id)
         
+        # Check for due reminders
+        due_reminders = get_due_reminders(user_id)
+        pending_reminders = get_pending_reminders(user_id)
+        
         # Debug: Log what we're retrieving
         print(f"🔍 Generating response for user_id: '{user_id}'")
         print(f"🔍 Retrieved user_profile: {user_profile}")
@@ -558,7 +738,26 @@ Key behaviors:
             
         # Handle personal information sharing
         if personal_info:
-            system_content += f"\n\nThe user just shared new personal information: {personal_info}"
+            if "reminder_created" in personal_info:
+                reminder = personal_info["reminder_created"]
+                system_content += f"\n\nThe user just created a reminder: '{reminder['content']}' for {reminder['datetime'].strftime('%B %d at %I:%M %p')}. Acknowledge this naturally and confirm the reminder."
+            
+            other_personal_info = {k: v for k, v in personal_info.items() if k != "reminder_created"}
+            if other_personal_info:
+                system_content += f"\n\nThe user just shared new personal information: {other_personal_info}"
+        
+        # Handle due reminders (this is the key feature!)
+        if due_reminders:
+            reminder_texts = []
+            for reminder in due_reminders:
+                reminder_texts.append(f"'{reminder['content']}' (was set for {reminder['datetime'].strftime('%B %d at %I:%M %p')})")
+            
+            system_content += f"\n\n🔔 IMPORTANT: You have {len(due_reminders)} reminder(s) to deliver RIGHT NOW as a caring friend would:\n" + "\n".join(f"- {text}" for text in reminder_texts)
+            system_content += f"\n\nDeliver these reminders warmly and naturally as if you're a thoughtful friend who genuinely cares about helping them remember important things."
+        
+        # Add context about pending reminders
+        if pending_reminders:
+            system_content += f"\n\nYou also have {len(pending_reminders)} upcoming reminder(s) set for this user."
             
         # Add tool results if available
         if tool_result:
@@ -662,7 +861,22 @@ def rag_query_sync(request: dict):
         # Check for personal information in the message and store it
         personal_info = extract_personal_info(query_text)
         if personal_info:
-            store_personal_info_simple(user_id, personal_info)
+            # Handle reminder requests specially
+            if "reminder_request" in personal_info:
+                reminder_data = personal_info["reminder_request"]
+                reminder_id = store_reminder(user_id, reminder_data)
+                personal_info["reminder_created"] = {
+                    "id": reminder_id,
+                    "content": reminder_data["content"],
+                    "datetime": reminder_data["datetime"]
+                }
+                # Remove the raw reminder_request to avoid confusion
+                del personal_info["reminder_request"]
+            
+            # Store other personal info normally
+            other_info = {k: v for k, v in personal_info.items() if k != "reminder_created"}
+            if other_info:
+                store_personal_info_simple(user_id, other_info)
         
         # Store user message for future memory/context (disabled for now to prevent errors)
         # try:
@@ -1121,6 +1335,86 @@ async def ingest_directory(directory_path: Path, user_scope: str, safety_level: 
                 
             except Exception as e:
                 print(f"Error processing {file_path}: {e}")
+
+@app.get("/reminders/check/{user_id}")
+def check_reminders(user_id: str):
+    """Check for due reminders for a user (called on app startup)"""
+    try:
+        from datetime import datetime
+        due_reminders = get_due_reminders(user_id)
+        pending_reminders = get_pending_reminders(user_id)
+        
+        # Format reminders for easy consumption
+        due_formatted = []
+        for reminder in due_reminders:
+            due_formatted.append({
+                "id": reminder["id"],
+                "content": reminder["content"],
+                "datetime": reminder["datetime"].isoformat(),
+                "overdue_minutes": int((datetime.now() - reminder["datetime"]).total_seconds() / 60)
+            })
+        
+        pending_formatted = []
+        for reminder in pending_reminders:
+            pending_formatted.append({
+                "id": reminder["id"],
+                "content": reminder["content"],
+                "datetime": reminder["datetime"].isoformat(),
+                "minutes_until": int((reminder["datetime"] - datetime.now()).total_seconds() / 60)
+            })
+        
+        return {
+            "status": "success",
+            "due_reminders": due_formatted,
+            "pending_reminders": pending_formatted,
+            "total_due": len(due_formatted),
+            "total_pending": len(pending_formatted)
+        }
+        
+    except Exception as e:
+        return {"status": "error", "message": f"Reminder check failed: {str(e)}"}
+
+@app.get("/reminders/all/{user_id}")
+def get_all_reminders(user_id: str):
+    """Get all reminders for a user"""
+    try:
+        from datetime import datetime
+        if user_id not in user_reminders:
+            return {"status": "success", "reminders": []}
+        
+        all_reminders = []
+        for reminder in user_reminders[user_id]:
+            all_reminders.append({
+                "id": reminder["id"],
+                "content": reminder["content"],
+                "datetime": reminder["datetime"].isoformat(),
+                "created_at": reminder["created_at"].isoformat(),
+                "triggered": reminder["triggered"],
+                "status": "triggered" if reminder["triggered"] else ("due" if reminder["datetime"] <= datetime.now() else "pending")
+            })
+        
+        return {
+            "status": "success",
+            "reminders": all_reminders,
+            "total": len(all_reminders)
+        }
+        
+    except Exception as e:
+        return {"status": "error", "message": f"Failed to get reminders: {str(e)}"}
+
+@app.delete("/reminders/{user_id}/{reminder_id}")
+def delete_reminder(user_id: str, reminder_id: str):
+    """Delete a specific reminder"""
+    try:
+        if user_id not in user_reminders:
+            return {"status": "error", "message": "No reminders found for user"}
+        
+        user_reminders[user_id] = [r for r in user_reminders[user_id] if r["id"] != reminder_id]
+        
+        return {"status": "success", "message": f"Reminder {reminder_id} deleted"}
+        
+    except Exception as e:
+        return {"status": "error", "message": f"Failed to delete reminder: {str(e)}"}
 
 if __name__ == "__main__":
     import uvicorn
