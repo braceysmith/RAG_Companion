@@ -34,8 +34,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Initialize database
-db = RAGDatabase(os.getenv("DATABASE_URL", "postgresql://user:password@localhost/rag_db"))
+# Initialize database with better error handling
+database_url = os.getenv("DATABASE_URL", "postgresql://user:password@localhost/rag_db")
+db = RAGDatabase(database_url)
+
+# Global variable to track database status
+database_available = False
 
 # Initialize chunker and processor
 chunker = DocumentChunker()
@@ -133,17 +137,29 @@ user_reminders = {}  # Store active reminders {user_id: [reminder_objects]}
 @app.on_event("startup")
 async def startup_event():
     """Initialize database on startup"""
+    global database_available
     try:
         await db.initialize()
-        print("RAG service started successfully with database")
+        database_available = True
+        print("✅ RAG service started successfully with PostgreSQL + pgvector")
+        print(f"📊 Database URL: {database_url[:50]}...")
     except Exception as e:
-        print(f"Database initialization failed: {e}")
-        print("RAG service started without database")
+        database_available = False
+        print(f"❌ Database initialization failed: {e}")
+        print(f"🔄 RAG service started with in-memory fallback mode")
+        print(f"💡 To enable vector database: Set DATABASE_URL to a PostgreSQL URL with pgvector extension")
 
 @app.get("/health")
 async def health_check():
     """Health check endpoint"""
-    return {"status": "healthy", "service": "RAG Companion Service"}
+    return {
+        "status": "healthy", 
+        "service": "RAG Companion Service",
+        "database_available": database_available,
+        "vector_search": "enabled" if database_available else "fallback_mode",
+        "stored_users": len(user_profiles),
+        "active_reminders": sum(len(reminders) for reminders in user_reminders.values())
+    }
 
 @app.post("/test")
 def test_endpoint(request: dict):
@@ -940,12 +956,17 @@ def rag_query_sync(request: dict):
                 "from_cache": False
             }
         
-        # Search database (simplified for stability)
+        # Search database with proper error handling
         db_start = time.time()
         try:
-            # Skip database search temporarily to isolate the issue
-            db_results = []
-            print(f"Database search temporarily disabled for debugging")
+            # Try database search with vector similarity
+            if database_available and hasattr(db, 'search_chunks'):
+                print(f"🔍 Searching vector database for: {query_text[:50]}...")
+                db_results = await db.search_chunks(query_embedding, top_k)
+                print(f"📊 Database returned {len(db_results)} results")
+            else:
+                print(f"📝 Vector database not available - using in-memory fallback response")
+                db_results = []
             
             db_time = (time.time() - db_start) * 1000
             
