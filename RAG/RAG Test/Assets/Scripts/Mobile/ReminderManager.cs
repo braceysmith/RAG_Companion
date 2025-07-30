@@ -1,0 +1,330 @@
+using System;
+using System.Collections;
+using System.Collections.Generic;
+using UnityEngine;
+using UnityEngine.Networking;
+using TMPro;
+using Newtonsoft.Json;
+
+[System.Serializable]
+public class ReminderData
+{
+    public string id;
+    public string content;
+    public string datetime;
+    public bool triggered;
+    public string status;
+    public int overdue_minutes;
+    public int minutes_until;
+}
+
+[System.Serializable]
+public class ReminderResponse
+{
+    public string status;
+    public List<ReminderData> due_reminders;
+    public List<ReminderData> pending_reminders;
+    public int total_due;
+    public int total_pending;
+}
+
+public class ReminderManager : MonoBehaviour
+{
+    [Header("Reminder Settings")]
+    [SerializeField] private string ragApiUrl = "https://your-rag-api.up.railway.app";
+    [SerializeField] private string userId = "mobile-user";
+    [SerializeField] private float checkInterval = 60f; // Check every minute
+    
+    [Header("UI References")]
+    [SerializeField] private GameObject reminderNotificationPanel;
+    [SerializeField] private TextMeshProUGUI reminderText;
+    [SerializeField] private TextMeshProUGUI reminderTimeText;
+    
+    [Header("Mobile Notifications")]
+    [SerializeField] private bool enableMobileNotifications = true;
+    
+    // Events
+    public System.Action<List<ReminderData>> OnRemindersReceived;
+    public System.Action<ReminderData> OnReminderDue;
+    
+    private List<ReminderData> pendingReminders = new List<ReminderData>();
+    private List<ReminderData> dueReminders = new List<ReminderData>();
+    private Coroutine reminderCheckCoroutine;
+    
+    void Start()
+    {
+        // Check for reminders on app startup
+        StartCoroutine(CheckRemindersOnStartup());
+        
+        // Start periodic reminder checking
+        reminderCheckCoroutine = StartCoroutine(PeriodicReminderCheck());
+        
+        // Initialize mobile notifications if available
+        if (enableMobileNotifications)
+        {
+            InitializeMobileNotifications();
+        }
+    }
+    
+    void OnDestroy()
+    {
+        if (reminderCheckCoroutine != null)
+        {
+            StopCoroutine(reminderCheckCoroutine);
+        }
+    }
+    
+    IEnumerator CheckRemindersOnStartup()
+    {
+        Debug.Log("🔔 Checking for reminders on app startup...");
+        yield return StartCoroutine(CheckReminders());
+        
+        // If there are due reminders, show them immediately
+        if (dueReminders.Count > 0)
+        {
+            ShowStartupReminderWelcome();
+        }
+    }
+    
+    IEnumerator PeriodicReminderCheck()
+    {
+        while (true)
+        {
+            yield return new WaitForSeconds(checkInterval);
+            yield return StartCoroutine(CheckReminders());
+        }
+    }
+    
+    public IEnumerator CheckReminders()
+    {
+        if (string.IsNullOrEmpty(ragApiUrl) || string.IsNullOrEmpty(userId))
+        {
+            Debug.LogWarning("ReminderManager: API URL or User ID not set");
+            yield break;
+        }
+        
+        string url = $"{ragApiUrl}/reminders/check/{userId}";
+        
+        using (UnityWebRequest request = UnityWebRequest.Get(url))
+        {
+            yield return request.SendWebRequest();
+            
+            if (request.result == UnityWebRequest.Result.Success)
+            {
+                try
+                {
+                    ReminderResponse response = JsonConvert.DeserializeObject<ReminderResponse>(request.downloadHandler.text);
+                    
+                    if (response.status == "success")
+                    {
+                        // Update local reminder lists
+                        List<ReminderData> newDueReminders = response.due_reminders ?? new List<ReminderData>();
+                        pendingReminders = response.pending_reminders ?? new List<ReminderData>();
+                        
+                        // Check for newly due reminders
+                        foreach (var newReminder in newDueReminders)
+                        {
+                            bool isNewlyDue = !dueReminders.Exists(r => r.id == newReminder.id);
+                            if (isNewlyDue)
+                            {
+                                Debug.Log($"🔔 New reminder due: {newReminder.content}");
+                                OnReminderDue?.Invoke(newReminder);
+                                
+                                // Show notification
+                                ShowReminderNotification(newReminder);
+                                
+                                // Send mobile push notification if app is in background
+                                if (enableMobileNotifications && !Application.isFocused)
+                                {
+                                    SendMobileNotification(newReminder);
+                                }
+                            }
+                        }
+                        
+                        dueReminders = newDueReminders;
+                        OnRemindersReceived?.Invoke(dueReminders);
+                        
+                        Debug.Log($"📅 Reminder check: {response.total_due} due, {response.total_pending} pending");
+                    }
+                    else
+                    {
+                        Debug.LogError($"Reminder check failed: {response.status}");
+                    }
+                }
+                catch (System.Exception e)
+                {
+                    Debug.LogError($"Failed to parse reminder response: {e.Message}");
+                }
+            }
+            else
+            {
+                Debug.LogError($"Reminder check request failed: {request.error}");
+            }
+        }
+    }
+    
+    private void ShowReminderNotification(ReminderData reminder)
+    {
+        if (reminderNotificationPanel != null)
+        {
+            reminderNotificationPanel.SetActive(true);
+            
+            if (reminderText != null)
+            {
+                reminderText.text = $"🔔 Reminder: {reminder.content}";
+            }
+            
+            if (reminderTimeText != null)
+            {
+                if (reminder.overdue_minutes > 0)
+                {
+                    reminderTimeText.text = $"(was due {reminder.overdue_minutes} minutes ago)";
+                }
+                else
+                {
+                    reminderTimeText.text = "(due now)";
+                }
+            }
+            
+            // Auto-hide after 10 seconds
+            StartCoroutine(HideReminderNotificationAfterDelay(10f));
+        }
+    }
+    
+    private void ShowStartupReminderWelcome()
+    {
+        Debug.Log($"🔔 Welcome back! You have {dueReminders.Count} reminder(s) waiting.");
+        
+        // Trigger a conversation with the AI to deliver the reminders
+        var mobileChat = FindObjectOfType<MobileRealtimeChat>();
+        if (mobileChat != null)
+        {
+            // The AI will automatically check for due reminders and deliver them
+            // when the user interacts with it next
+            Debug.Log("🔔 AI will deliver reminders in next conversation");
+        }
+    }
+    
+    IEnumerator HideReminderNotificationAfterDelay(float delay)
+    {
+        yield return new WaitForSeconds(delay);
+        
+        if (reminderNotificationPanel != null)
+        {
+            reminderNotificationPanel.SetActive(false);
+        }
+    }
+    
+    public void DismissReminderNotification()
+    {
+        if (reminderNotificationPanel != null)
+        {
+            reminderNotificationPanel.SetActive(false);
+        }
+    }
+    
+    public void GetAllReminders(System.Action<List<ReminderData>> callback)
+    {
+        StartCoroutine(GetAllRemindersCoroutine(callback));
+    }
+    
+    IEnumerator GetAllRemindersCoroutine(System.Action<List<ReminderData>> callback)
+    {
+        string url = $"{ragApiUrl}/reminders/all/{userId}";
+        
+        using (UnityWebRequest request = UnityWebRequest.Get(url))
+        {
+            yield return request.SendWebRequest();
+            
+            if (request.result == UnityWebRequest.Result.Success)
+            {
+                try
+                {
+                    var response = JsonConvert.DeserializeObject<Dictionary<string, object>>(request.downloadHandler.text);
+                    
+                    if (response["status"].ToString() == "success")
+                    {
+                        var remindersJson = response["reminders"];
+                        var reminders = JsonConvert.DeserializeObject<List<ReminderData>>(remindersJson.ToString());
+                        callback?.Invoke(reminders);
+                    }
+                }
+                catch (System.Exception e)
+                {
+                    Debug.LogError($"Failed to get all reminders: {e.Message}");
+                    callback?.Invoke(new List<ReminderData>());
+                }
+            }
+            else
+            {
+                Debug.LogError($"Get all reminders failed: {request.error}");
+                callback?.Invoke(new List<ReminderData>());
+            }
+        }
+    }
+    
+    private void InitializeMobileNotifications()
+    {
+#if UNITY_ANDROID && !UNITY_EDITOR
+        // Android notification setup
+        var channel = new Unity.Notifications.Android.AndroidNotificationChannel()
+        {
+            Id = "reminder_channel",
+            Name = "AI Reminders",
+            Importance = Unity.Notifications.Android.Importance.High,
+            Description = "Notifications for AI reminders",
+        };
+        Unity.Notifications.Android.AndroidNotificationCenter.RegisterNotificationChannel(channel);
+        
+#elif UNITY_IOS && !UNITY_EDITOR
+        // iOS notification setup
+        Unity.Notifications.iOS.iOSNotificationCenter.RequestAuthorizationAsync(
+            Unity.Notifications.iOS.AuthorizationOption.Alert |
+            Unity.Notifications.iOS.AuthorizationOption.Badge |
+            Unity.Notifications.iOS.AuthorizationOption.Sound
+        );
+#endif
+        
+        Debug.Log("📱 Mobile notifications initialized");
+    }
+    
+    private void SendMobileNotification(ReminderData reminder)
+    {
+#if UNITY_ANDROID && !UNITY_EDITOR
+        var notification = new Unity.Notifications.Android.AndroidNotification();
+        notification.Title = "AI Reminder";
+        notification.Text = reminder.content;
+        notification.SmallIcon = "icon_small";
+        notification.LargeIcon = "icon_large";
+        notification.FireTime = System.DateTime.Now;
+        
+        Unity.Notifications.Android.AndroidNotificationCenter.SendNotification(notification, "reminder_channel");
+        
+#elif UNITY_IOS && !UNITY_EDITOR
+        var notification = new Unity.Notifications.iOS.iOSNotification()
+        {
+            Title = "AI Reminder",
+            Body = reminder.content,
+            ShowInForeground = false,
+            ForegroundPresentationOption = Unity.Notifications.iOS.PresentationOption.Alert | Unity.Notifications.iOS.PresentationOption.Sound,
+            CategoryIdentifier = "reminder_category",
+            ThreadIdentifier = "reminder_thread",
+            Trigger = new Unity.Notifications.iOS.iOSNotificationTimeIntervalTrigger()
+            {
+                TimeInterval = new System.TimeSpan(0, 0, 1),
+                Repeats = false
+            }
+        };
+        
+        Unity.Notifications.iOS.iOSNotificationCenter.ScheduleNotification(notification);
+#endif
+        
+        Debug.Log($"📱 Sent mobile notification: {reminder.content}");
+    }
+    
+    // Public methods for UI integration
+    public int GetDueReminderCount() => dueReminders.Count;
+    public int GetPendingReminderCount() => pendingReminders.Count;
+    public List<ReminderData> GetDueReminders() => new List<ReminderData>(dueReminders);
+    public List<ReminderData> GetPendingReminders() => new List<ReminderData>(pendingReminders);
+}

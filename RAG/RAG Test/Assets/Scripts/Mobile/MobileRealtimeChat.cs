@@ -24,6 +24,10 @@ public class MobileRealtimeChat : MonoBehaviour
     [SerializeField] private bool enableRAGContext = true; // Now enabled for conversation memory
     [SerializeField] private int maxRAGResults = 3;
     
+    [Header("Reminder Integration")]
+    [SerializeField] private bool enableReminders = true;
+    [SerializeField] private ReminderManager reminderManager;
+    
     // WebRTC Components
     private RTCPeerConnection peerConnection;
     private RTCDataChannel dataChannel;
@@ -72,6 +76,25 @@ public class MobileRealtimeChat : MonoBehaviour
         AudioSettings.Reset(audioConfig);
         
         InitializeMobileRealtime();
+        
+        // Initialize reminder integration
+        if (enableReminders && reminderManager == null)
+        {
+            reminderManager = FindObjectOfType<ReminderManager>();
+            if (reminderManager == null)
+            {
+                GameObject reminderObj = new GameObject("ReminderManager");
+                reminderManager = reminderObj.AddComponent<ReminderManager>();
+                
+                // Sync settings
+                var reminderManagerType = typeof(ReminderManager);
+                var ragApiUrlField = reminderManagerType.GetField("ragApiUrl", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+                var userIdField = reminderManagerType.GetField("userId", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+                
+                if (ragApiUrlField != null) ragApiUrlField.SetValue(reminderManager, ragApiUrl);
+                if (userIdField != null) userIdField.SetValue(reminderManager, userId);
+            }
+        }
     }
     
     private void InitializeMobileRealtime()
