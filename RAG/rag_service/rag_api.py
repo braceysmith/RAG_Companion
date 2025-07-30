@@ -391,9 +391,13 @@ def extract_personal_info(message: str) -> dict:
         ("remind me to ", "reminder"),
         ("remind me at ", "reminder_at"),
         ("remind me on ", "reminder_on"),
+        ("remind me in ", "reminder"),  # Added this!
         ("remind me of ", "reminder"),  # Added this!
         ("please remind me to ", "reminder"),  # Added this!
         ("please remind me of ", "reminder"),  # Added this!
+        ("please remind me in ", "reminder"),  # Added this!
+        ("can you remind me in ", "reminder"),  # Added this!
+        ("can you remind me to ", "reminder"),  # Added this!
         ("don't let me forget to ", "reminder"),
         ("i need to remember to ", "reminder"),
         ("set a reminder for ", "reminder"),
@@ -1020,7 +1024,21 @@ async def store_memory(request: MemoryRequest):
         if request.memory_type == "conversation":
             # Extract personal info and store it
             personal_info = extract_personal_info(request.content)
+            print(f"🔍 Extracted personal info: {personal_info}")
             if personal_info:
+                # Handle reminder requests specially
+                if "reminder_request" in personal_info:
+                    reminder_data = personal_info["reminder_request"]
+                    reminder_id = store_reminder(request.user_id, reminder_data)
+                    personal_info["reminder_created"] = {
+                        "id": reminder_id,
+                        "content": reminder_data["content"],
+                        "datetime": reminder_data["datetime"]
+                    }
+                    # Remove the raw reminder_request to avoid confusion
+                    del personal_info["reminder_request"]
+                    print(f"✅ Created reminder {reminder_id}: {reminder_data['content']}")
+                
                 store_personal_info_simple(request.user_id, personal_info)
                 print(f"Extracted and stored personal info: {personal_info}")
                 

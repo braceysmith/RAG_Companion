@@ -444,6 +444,7 @@
 "Assets/Scripts/Mobile/MobileRAGClient.cs"
 "Assets/Scripts/Mobile/MobileRAGCompanionSystem.cs"
 "Assets/Scripts/Mobile/MobileRealtimeChat.cs"
+"Assets/Scripts/Mobile/ReminderManager.cs"
 "Assets/Scripts/OpenAIAPIClient.cs"
 "Assets/Scripts/RAG/ContextAssembler.cs"
 "Assets/Scripts/RAG/ConversationState.cs"
