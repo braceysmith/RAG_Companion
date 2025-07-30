@@ -391,6 +391,9 @@ def extract_personal_info(message: str) -> dict:
         ("remind me to ", "reminder"),
         ("remind me at ", "reminder_at"),
         ("remind me on ", "reminder_on"),
+        ("remind me of ", "reminder"),  # Added this!
+        ("please remind me to ", "reminder"),  # Added this!
+        ("please remind me of ", "reminder"),  # Added this!
         ("don't let me forget to ", "reminder"),
         ("i need to remember to ", "reminder"),
         ("set a reminder for ", "reminder"),
