@@ -831,13 +831,17 @@ public class MobileRealtimeChat : MonoBehaviour
     private void HandleResponseComplete()
     {
         isAIResponding = false;
-        LogMessage("AI response completed");
+        LogMessage("AI response completed - ready for next turn");
         
-        // Update UI
+        // Reset to idle state for next conversation turn
         if (companionUI != null)
         {
             companionUI.ShowAudioPlaybackIndicator(false);
             companionUI.ShowProcessingIndicator(false);
+            companionUI.UpdateStatusText("Ready - Tap to talk");
+            
+            // Reset UI state for continuous conversation
+            companionUI.ResetToIdleState();
         }
     }
     
@@ -1432,21 +1436,15 @@ public class MobileRealtimeChat : MonoBehaviour
     
     private void HandleOutputAudioBufferStopped(JObject message)
     {
-        LogMessage("AI audio output stopped - response complete, ready for next turn");
+        LogMessage("AI audio buffer chunk stopped - continuing to wait for response.done");
         
-        // Reset to idle state for next conversation turn
+        // Don't reset UI state here - this just means one audio chunk ended
+        // The complete response.done event will handle final state transition
+        // Just hide the audio playback indicator temporarily
         if (companionUI != null)
         {
             companionUI.ShowAudioPlaybackIndicator(false);
-            companionUI.ShowProcessingIndicator(false);
-            companionUI.UpdateStatusText("Ready - Tap to talk");
-            
-            // Reset UI state for continuous conversation
-            companionUI.ResetToIdleState();
         }
-        
-        // Mark response as complete
-        isAIResponding = false;
     }
     
     private void HandleResponseCancelled(JObject message)
