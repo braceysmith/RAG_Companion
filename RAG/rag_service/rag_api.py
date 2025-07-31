@@ -890,7 +890,7 @@ def extract_location_from_query(query: str) -> str:
     return ""
 
 @app.post("/query")
-def rag_query_sync(request: dict):
+async def rag_query_sync(request: dict):
     """Main RAG query endpoint with full RAG functionality"""
     try:
         import time
