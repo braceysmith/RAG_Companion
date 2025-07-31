@@ -80,7 +80,7 @@ public class MobileRealtimeChat : MonoBehaviour
         // Initialize reminder integration
         if (enableReminders && reminderManager == null)
         {
-            reminderManager = FindObjectOfType<ReminderManager>();
+            reminderManager = FindFirstObjectByType<ReminderManager>();
             if (reminderManager == null)
             {
                 GameObject reminderObj = new GameObject("ReminderManager");
@@ -1847,7 +1847,7 @@ public class MobileRealtimeChat : MonoBehaviour
             // Fall back to UI display only
             if (companionUI != null)
             {
-                companionUI.DisplayMessage(aiMessage, false);
+                companionUI.AddMessage(aiMessage, "assistant", true);
                 companionUI.UpdateStatusText("Reminder delivered (no audio connection)");
             }
             return;
@@ -1898,7 +1898,7 @@ public class MobileRealtimeChat : MonoBehaviour
                 // Update UI to show AI is speaking
                 if (companionUI != null)
                 {
-                    companionUI.DisplayMessage(aiMessage, false);
+                    companionUI.AddMessage(aiMessage, "assistant", true);
                     companionUI.SetToPlayingAudioState();
                     companionUI.UpdateStatusText("Delivering your reminder...");
                 }
@@ -1910,7 +1910,7 @@ public class MobileRealtimeChat : MonoBehaviour
                 // Fall back to UI display
                 if (companionUI != null)
                 {
-                    companionUI.DisplayMessage(aiMessage, false);
+                    companionUI.AddMessage(aiMessage, "assistant", true);
                     companionUI.UpdateStatusText("Reminder delivered (audio unavailable)");
                 }
             }
@@ -1922,7 +1922,7 @@ public class MobileRealtimeChat : MonoBehaviour
             // Fall back to UI display
             if (companionUI != null)
             {
-                companionUI.DisplayMessage(aiMessage, false);
+                companionUI.AddMessage(aiMessage, "assistant", true);
                 companionUI.UpdateStatusText("Reminder delivered (fallback mode)");
             }
         }

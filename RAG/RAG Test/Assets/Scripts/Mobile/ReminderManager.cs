@@ -144,9 +144,18 @@ public class ReminderManager : MonoBehaviour
                         }
                         
                         // If we have new due reminders, trigger AI delivery
-                        if (hasNewReminders && Application.isFocused)
+                        // Note: Removed Application.isFocused check to allow delivery regardless of app state
+                        if (hasNewReminders)
                         {
                             Debug.Log("🤖 Triggering AI reminder delivery...");
+                            StartCoroutine(DeliverRemindersThroughAI());
+                        }
+                        
+                        // Also check if we have any due reminders on this check (not just new ones)
+                        // This handles cases where reminders were due before but delivery failed
+                        else if (newDueReminders.Count > 0)
+                        {
+                            Debug.Log($"🔔 Found {newDueReminders.Count} existing due reminders - attempting delivery");
                             StartCoroutine(DeliverRemindersThroughAI());
                         }
                         
@@ -329,8 +338,9 @@ public class ReminderManager : MonoBehaviour
     private IEnumerator DeliverRemindersThroughAI()
     {
         string url = $"{ragApiUrl}/reminders/deliver/{userId}";
+        Debug.Log($"🔗 Attempting to deliver reminders via: {url}");
         
-        using (UnityWebRequest request = UnityWebRequest.Post(url, ""))
+        using (UnityWebRequest request = UnityWebRequest.PostWwwForm(url, ""))
         {
             request.SetRequestHeader("Content-Type", "application/json");
             yield return request.SendWebRequest();
@@ -350,7 +360,7 @@ public class ReminderManager : MonoBehaviour
                         Debug.Log($"🤖 AI delivered {reminderCount} reminder(s): {aiMessage}");
                         
                         // Trigger AI to speak this message through the conversation system
-                        var mobileChat = FindObjectOfType<MobileRealtimeChat>();
+                        var mobileChat = FindFirstObjectByType<MobileRealtimeChat>();
                         if (mobileChat != null)
                         {
                             // Send the AI message as if it's starting a new conversation
