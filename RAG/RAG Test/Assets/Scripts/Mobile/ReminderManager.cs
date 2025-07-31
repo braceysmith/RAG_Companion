@@ -393,6 +393,14 @@ public class ReminderManager : MonoBehaviour
         }
     }
     
+    // Manual testing method - force trigger reminder delivery for testing
+    [System.Diagnostics.Conditional("UNITY_EDITOR")]
+    public void TestReminderDelivery()
+    {
+        Debug.Log("🧪 MANUAL TEST: Forcing reminder delivery test...");
+        StartCoroutine(DeliverRemindersThroughAI());
+    }
+    
     // Public methods for UI integration
     public int GetDueReminderCount() => dueReminders.Count;
     public int GetPendingReminderCount() => pendingReminders.Count;

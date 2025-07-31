@@ -1487,6 +1487,44 @@ def delete_reminder(user_id: str, reminder_id: str):
     except Exception as e:
         return {"status": "error", "message": f"Failed to delete reminder: {str(e)}"}
 
+@app.post("/reminders/test/{user_id}")
+def create_test_reminder(user_id: str):
+    """Create an immediately due test reminder for testing"""
+    try:
+        from datetime import datetime
+        import uuid
+        
+        # Create a test reminder that's immediately due
+        test_reminder = {
+            "id": str(uuid.uuid4()),
+            "content": f"Test reminder for {user_id} - this is a test of the proactive delivery system",
+            "datetime": datetime.now(),  # Due immediately
+            "created_at": datetime.now(),
+            "triggered": False
+        }
+        
+        # Store it
+        if user_id not in user_reminders:
+            user_reminders[user_id] = []
+        
+        user_reminders[user_id].append(test_reminder)
+        
+        print(f"🧪 Created test reminder for {user_id}: {test_reminder['content']}")
+        
+        return {
+            "status": "success", 
+            "message": "Test reminder created and immediately due",
+            "reminder": {
+                "id": test_reminder["id"],
+                "content": test_reminder["content"],
+                "datetime": test_reminder["datetime"].isoformat()
+            }
+        }
+        
+    except Exception as e:
+        print(f"Test reminder creation error: {e}")
+        return {"status": "error", "message": f"Failed to create test reminder: {str(e)}"}
+
 @app.post("/reminders/deliver/{user_id}")
 async def deliver_due_reminders(user_id: str):
     """Generate AI message to deliver due reminders to user"""
