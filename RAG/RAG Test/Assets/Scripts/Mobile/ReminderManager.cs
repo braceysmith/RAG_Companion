@@ -166,7 +166,21 @@ public class ReminderManager : MonoBehaviour
                     }
                     else
                     {
-                        Debug.LogError($"Reminder check failed: {response.status}");
+                        // Try to get the error message if available
+                        string errorMessage = response.status;
+                        try 
+                        {
+                            var responseDict = JsonConvert.DeserializeObject<Dictionary<string, object>>(request.downloadHandler.text);
+                            if (responseDict.ContainsKey("message"))
+                            {
+                                errorMessage = responseDict["message"].ToString();
+                            }
+                        }
+                        catch 
+                        {
+                            // If we can't parse the message, just use the status
+                        }
+                        Debug.LogError($"Reminder check failed: {errorMessage}");
                     }
                 }
                 catch (System.Exception e)

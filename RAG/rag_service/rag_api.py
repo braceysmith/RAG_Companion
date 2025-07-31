@@ -566,7 +566,7 @@ def parse_reminder_request(remainder: str, pattern_type: str) -> dict:
 def store_reminder(user_id: str, reminder_data: dict) -> str:
     """Store a reminder for a user"""
     import uuid
-    from datetime import datetime
+    from datetime import datetime, timezone
     
     reminder_id = str(uuid.uuid4())[:8]  # Short ID
     
@@ -575,7 +575,7 @@ def store_reminder(user_id: str, reminder_data: dict) -> str:
         "content": reminder_data["content"],
         "datetime": reminder_data["datetime"],
         "original_text": reminder_data["original_text"],
-        "created_at": datetime.now(),
+        "created_at": datetime.now(timezone.utc),
         "triggered": False,
         "user_id": user_id
     }
@@ -625,16 +625,23 @@ def get_due_reminders(user_id: str) -> list:
 
 def get_pending_reminders(user_id: str) -> list:
     """Get all pending (future) reminders for a user"""
-    from datetime import datetime
+    from datetime import datetime, timezone
     
     if user_id not in user_reminders:
         return []
     
     pending_reminders = []
-    now = datetime.now()
+    now = datetime.now(timezone.utc)
     
     for reminder in user_reminders[user_id]:
-        if not reminder["triggered"] and reminder["datetime"] > now:
+        reminder_time = reminder["datetime"]
+        
+        # Ensure both times are timezone-aware for proper comparison
+        if reminder_time.tzinfo is None:
+            # If reminder time is naive, assume it's UTC
+            reminder_time = reminder_time.replace(tzinfo=timezone.utc)
+        
+        if not reminder["triggered"] and reminder_time > now:
             pending_reminders.append(reminder)
     
     return pending_reminders
@@ -806,9 +813,16 @@ Key behaviors:
         if "reminder_created" in user_profile:
             reminder = user_profile["reminder_created"]
             # Check if this reminder was created recently (within 30 seconds)
-            from datetime import datetime, timedelta
+            from datetime import datetime, timedelta, timezone
             if isinstance(reminder.get("datetime"), datetime):
-                time_since_creation = datetime.now() - reminder["datetime"]
+                now_utc = datetime.now(timezone.utc)
+                reminder_time = reminder["datetime"]
+                
+                # Ensure reminder time is timezone-aware
+                if reminder_time.tzinfo is None:
+                    reminder_time = reminder_time.replace(tzinfo=timezone.utc)
+                
+                time_since_creation = now_utc - reminder_time
                 if time_since_creation.total_seconds() < 30 and "reminder_request" not in personal_info:
                     system_content += f"\n\nIMPORTANT: You just successfully created a reminder for the user: '{reminder['content']}' scheduled for {reminder['datetime'].strftime('%B %d at %I:%M %p')}. Acknowledge this and confirm that the reminder has been set."
         
@@ -1420,27 +1434,39 @@ async def ingest_directory(directory_path: Path, user_scope: str, safety_level: 
 def check_reminders(user_id: str):
     """Check for due reminders for a user (called on app startup)"""
     try:
-        from datetime import datetime
+        from datetime import datetime, timezone
         due_reminders = get_due_reminders(user_id)
         pending_reminders = get_pending_reminders(user_id)
+        
+        now_utc = datetime.now(timezone.utc)
         
         # Format reminders for easy consumption
         due_formatted = []
         for reminder in due_reminders:
+            reminder_time = reminder["datetime"]
+            # Ensure reminder time is timezone-aware
+            if reminder_time.tzinfo is None:
+                reminder_time = reminder_time.replace(tzinfo=timezone.utc)
+            
             due_formatted.append({
                 "id": reminder["id"],
                 "content": reminder["content"],
                 "datetime": reminder["datetime"].isoformat(),
-                "overdue_minutes": int((datetime.now() - reminder["datetime"]).total_seconds() / 60)
+                "overdue_minutes": int((now_utc - reminder_time).total_seconds() / 60)
             })
         
         pending_formatted = []
         for reminder in pending_reminders:
+            reminder_time = reminder["datetime"]
+            # Ensure reminder time is timezone-aware
+            if reminder_time.tzinfo is None:
+                reminder_time = reminder_time.replace(tzinfo=timezone.utc)
+            
             pending_formatted.append({
                 "id": reminder["id"],
                 "content": reminder["content"],
                 "datetime": reminder["datetime"].isoformat(),
-                "minutes_until": int((reminder["datetime"] - datetime.now()).total_seconds() / 60)
+                "minutes_until": int((reminder_time - now_utc).total_seconds() / 60)
             })
         
         return {
@@ -1452,25 +1478,34 @@ def check_reminders(user_id: str):
         }
         
     except Exception as e:
+        print(f"❌ ERROR in check_reminders for user {user_id}: {e}")
+        import traceback
+        print(f"❌ Full traceback: {traceback.format_exc()}")
         return {"status": "error", "message": f"Reminder check failed: {str(e)}"}
 
 @app.get("/reminders/all/{user_id}")
 def get_all_reminders(user_id: str):
     """Get all reminders for a user"""
     try:
-        from datetime import datetime
+        from datetime import datetime, timezone
         if user_id not in user_reminders:
             return {"status": "success", "reminders": []}
         
+        now_utc = datetime.now(timezone.utc)
         all_reminders = []
         for reminder in user_reminders[user_id]:
+            reminder_time = reminder["datetime"]
+            # Ensure reminder time is timezone-aware
+            if reminder_time.tzinfo is None:
+                reminder_time = reminder_time.replace(tzinfo=timezone.utc)
+            
             all_reminders.append({
                 "id": reminder["id"],
                 "content": reminder["content"],
                 "datetime": reminder["datetime"].isoformat(),
                 "created_at": reminder["created_at"].isoformat(),
                 "triggered": reminder["triggered"],
-                "status": "triggered" if reminder["triggered"] else ("due" if reminder["datetime"] <= datetime.now() else "pending")
+                "status": "triggered" if reminder["triggered"] else ("due" if reminder_time <= now_utc else "pending")
             })
         
         return {
@@ -1594,7 +1629,7 @@ Keep it conversational and personal. Don't mention "delivering reminders" - just
 
         # Use the existing OpenAI client to generate response
         try:
-            response = await client.chat.completions.create(
+            response = client.chat.completions.create(
                 model="gpt-4o-mini",
                 messages=[
                     {"role": "system", "content": system_prompt},
