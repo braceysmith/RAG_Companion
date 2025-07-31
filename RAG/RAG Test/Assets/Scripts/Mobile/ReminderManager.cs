@@ -122,6 +122,7 @@ public class ReminderManager : MonoBehaviour
                         pendingReminders = response.pending_reminders ?? new List<ReminderData>();
                         
                         // Check for newly due reminders
+                        bool hasNewReminders = false;
                         foreach (var newReminder in newDueReminders)
                         {
                             bool isNewlyDue = !dueReminders.Exists(r => r.id == newReminder.id);
@@ -129,6 +130,7 @@ public class ReminderManager : MonoBehaviour
                             {
                                 Debug.Log($"🔔 New reminder due: {newReminder.content}");
                                 OnReminderDue?.Invoke(newReminder);
+                                hasNewReminders = true;
                                 
                                 // Show notification
                                 ShowReminderNotification(newReminder);
@@ -139,6 +141,13 @@ public class ReminderManager : MonoBehaviour
                                     SendMobileNotification(newReminder);
                                 }
                             }
+                        }
+                        
+                        // If we have new due reminders, trigger AI delivery
+                        if (hasNewReminders && Application.isFocused)
+                        {
+                            Debug.Log("🤖 Triggering AI reminder delivery...");
+                            StartCoroutine(DeliverRemindersThroughAI());
                         }
                         
                         dueReminders = newDueReminders;
@@ -195,14 +204,9 @@ public class ReminderManager : MonoBehaviour
     {
         Debug.Log($"🔔 Welcome back! You have {dueReminders.Count} reminder(s) waiting.");
         
-        // Trigger a conversation with the AI to deliver the reminders
-        var mobileChat = FindObjectOfType<MobileRealtimeChat>();
-        if (mobileChat != null)
-        {
-            // The AI will automatically check for due reminders and deliver them
-            // when the user interacts with it next
-            Debug.Log("🔔 AI will deliver reminders in next conversation");
-        }
+        // Trigger AI to proactively deliver the reminders
+        Debug.Log("🤖 Triggering AI startup reminder delivery...");
+        StartCoroutine(DeliverRemindersThroughAI());
     }
     
     IEnumerator HideReminderNotificationAfterDelay(float delay)
@@ -320,6 +324,62 @@ public class ReminderManager : MonoBehaviour
 #endif
         
         Debug.Log($"📱 Sent mobile notification: {reminder.content}");
+    }
+    
+    private IEnumerator DeliverRemindersThroughAI()
+    {
+        string url = $"{ragApiUrl}/reminders/deliver/{userId}";
+        
+        using (UnityWebRequest request = UnityWebRequest.Post(url, ""))
+        {
+            request.SetRequestHeader("Content-Type", "application/json");
+            yield return request.SendWebRequest();
+            
+            if (request.result == UnityWebRequest.Result.Success)
+            {
+                try
+                {
+                    var response = JsonConvert.DeserializeObject<Dictionary<string, object>>(request.downloadHandler.text);
+                    string status = response["status"].ToString();
+                    
+                    if (status == "success")
+                    {
+                        string aiMessage = response["message"].ToString();
+                        int reminderCount = int.Parse(response["reminders_delivered"].ToString());
+                        
+                        Debug.Log($"🤖 AI delivered {reminderCount} reminder(s): {aiMessage}");
+                        
+                        // Trigger AI to speak this message through the conversation system
+                        var mobileChat = FindObjectOfType<MobileRealtimeChat>();
+                        if (mobileChat != null)
+                        {
+                            // Send the AI message as if it's starting a new conversation
+                            mobileChat.TriggerAIReminderDelivery(aiMessage);
+                        }
+                        else
+                        {
+                            Debug.LogWarning("🔔 MobileRealtimeChat not found - AI reminder message cannot be delivered audibly");
+                        }
+                    }
+                    else if (status == "no_due_reminders")
+                    {
+                        Debug.Log("📅 No due reminders to deliver");
+                    }
+                    else
+                    {
+                        Debug.LogError($"AI reminder delivery failed: {response.ContainsKey("message") ? response["message"] : "Unknown error"}");
+                    }
+                }
+                catch (System.Exception e)
+                {
+                    Debug.LogError($"Failed to parse AI reminder delivery response: {e.Message}");
+                }
+            }
+            else
+            {
+                Debug.LogError($"AI reminder delivery request failed: {request.error}");
+            }
+        }
     }
     
     // Public methods for UI integration

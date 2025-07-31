@@ -510,6 +510,7 @@ def parse_reminder_request(remainder: str, pattern_type: str) -> dict:
                         unit = match.group(2)
                         if unit.startswith("minute"):
                             reminder_data["datetime"] = datetime.now() + timedelta(minutes=amount)
+                            print(f"⏰ Reminder set for: {reminder_data['datetime']} (in {amount} minutes)")
                         elif unit.startswith("hour"):
                             reminder_data["datetime"] = datetime.now() + timedelta(hours=amount)
                         elif unit.startswith("day"):
@@ -601,7 +602,9 @@ def get_due_reminders(user_id: str) -> list:
     for reminder in user_reminders[user_id]:
         reminder_time = reminder["datetime"]
         is_due = reminder_time <= now
+        time_diff = (reminder_time - now).total_seconds()
         print(f"  📝 Reminder: '{reminder['content']}' due at {reminder_time}, triggered: {reminder['triggered']}, is_due: {is_due}")
+        print(f"    ⏱️  Time difference: {time_diff:.1f} seconds ({time_diff/60:.1f} minutes)")
         
         if not reminder["triggered"] and is_due:
             reminder["triggered"] = True  # Mark as triggered
@@ -789,6 +792,16 @@ Key behaviors:
             other_personal_info = {k: v for k, v in personal_info.items() if k != "reminder_created"}
             if other_personal_info:
                 system_content += f"\n\nThe user just shared new personal information: {other_personal_info}"
+        
+        # Check for recently created reminders in user profile (within last 30 seconds)
+        if "reminder_created" in user_profile:
+            reminder = user_profile["reminder_created"]
+            # Check if this reminder was created recently (within 30 seconds)
+            from datetime import datetime, timedelta
+            if isinstance(reminder.get("datetime"), datetime):
+                time_since_creation = datetime.now() - reminder["datetime"]
+                if time_since_creation.total_seconds() < 30 and "reminder_request" not in personal_info:
+                    system_content += f"\n\nIMPORTANT: You just successfully created a reminder for the user: '{reminder['content']}' scheduled for {reminder['datetime'].strftime('%B %d at %I:%M %p')}. Acknowledge this and confirm that the reminder has been set."
         
         # Handle due reminders (this is the key feature!)
         if due_reminders:
@@ -989,13 +1002,7 @@ async def rag_query_sync(request: dict):
             if not results:
                 print(f"🔍 Calling generate_conversational_response for user_id: {user_id}")
                 # Generate fluid conversational response with tool support
-                import asyncio
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                response_text = loop.run_until_complete(
-                    generate_conversational_response(user_id, query_text, personal_info)
-                )
-                loop.close()
+                response_text = await generate_conversational_response(user_id, query_text, personal_info)
                 print(f"🔍 Generated response: {response_text[:100]}...")
                 
                 results = [
@@ -1479,6 +1486,103 @@ def delete_reminder(user_id: str, reminder_id: str):
         
     except Exception as e:
         return {"status": "error", "message": f"Failed to delete reminder: {str(e)}"}
+
+@app.post("/reminders/deliver/{user_id}")
+async def deliver_due_reminders(user_id: str):
+    """Generate AI message to deliver due reminders to user"""
+    try:
+        from datetime import datetime
+        import asyncio
+        
+        if user_id not in user_reminders:
+            return {"status": "no_reminders", "message": "No reminders found for user"}
+        
+        now = datetime.now()
+        due_reminders = []
+        
+        # Find all due reminders (not yet triggered)
+        for reminder in user_reminders[user_id]:
+            if not reminder["triggered"] and reminder["datetime"] <= now:
+                due_reminders.append(reminder)
+                # Mark as triggered to prevent duplicate delivery
+                reminder["triggered"] = True
+        
+        if not due_reminders:
+            return {"status": "no_due_reminders", "message": "No due reminders to deliver"}
+        
+        # Get user profile for personalized delivery
+        user_profile = get_user_profile(user_id)
+        user_name = user_profile.get("name", "").split()[0] if user_profile.get("name") else ""
+        
+        # Create context for AI to deliver reminders
+        reminder_context = "You have the following due reminders to deliver:\n"
+        for i, reminder in enumerate(due_reminders, 1):
+            time_overdue = (now - reminder["datetime"]).total_seconds() / 60
+            if time_overdue < 5:
+                timing = "right now"
+            elif time_overdue < 60:
+                timing = f"{int(time_overdue)} minutes ago"
+            else:
+                hours = int(time_overdue / 60)
+                timing = f"{hours} hour{'s' if hours > 1 else ''} ago"
+            
+            reminder_context += f"{i}. \"{reminder['content']}\" (was due {timing})\n"
+        
+        # Generate personalized AI response
+        system_prompt = f"""You are delivering due reminders to the user{f' (their name is {user_name})' if user_name else ''}. 
+
+{reminder_context}
+
+Deliver these reminders in a natural, conversational way. Be warm and helpful. Don't just list them - deliver them as if you're a caring assistant remembering things for them. If there are multiple reminders, you can group them naturally or deliver them one by one as makes sense.
+
+Keep it conversational and personal. Don't mention "delivering reminders" - just naturally bring up what they asked you to remind them about."""
+
+        # Use the existing OpenAI client to generate response
+        try:
+            response = await client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": "Hello, I just opened the app."}
+                ],
+                temperature=0.7,
+                max_tokens=500
+            )
+            
+            ai_message = response.choices[0].message.content.strip()
+            
+            # Store this as a conversation turn
+            store_conversation_turn(user_id, "[User opened app - checking for reminders]", ai_message)
+            
+            return {
+                "status": "success",
+                "message": ai_message,
+                "reminders_delivered": len(due_reminders),
+                "reminder_details": [
+                    {
+                        "id": r["id"],
+                        "content": r["content"],
+                        "was_due": r["datetime"].isoformat()
+                    } for r in due_reminders
+                ]
+            }
+            
+        except Exception as ai_error:
+            print(f"AI generation error: {ai_error}")
+            # Fallback to simple message
+            simple_message = f"Hi{f' {user_name}' if user_name else ''}! You have {len(due_reminders)} reminder{'s' if len(due_reminders) > 1 else ''}: "
+            simple_message += ", ".join([f'"{r["content"]}"' for r in due_reminders])
+            
+            return {
+                "status": "success",
+                "message": simple_message,
+                "reminders_delivered": len(due_reminders),
+                "ai_fallback": True
+            }
+        
+    except Exception as e:
+        print(f"Reminder delivery error: {e}")
+        return {"status": "error", "message": f"Failed to deliver reminders: {str(e)}"}
 
 if __name__ == "__main__":
     import uvicorn

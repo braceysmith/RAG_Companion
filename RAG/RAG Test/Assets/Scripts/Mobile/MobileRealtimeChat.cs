@@ -1835,6 +1835,99 @@ public class MobileRealtimeChat : MonoBehaviour
         LogMessage($"- Has WebRTC Track: {remoteAudioSource.clip != null}");
     }
     
+    // Trigger AI to deliver reminder messages proactively
+    public void TriggerAIReminderDelivery(string aiMessage)
+    {
+        LogMessage($"🔔 Triggering proactive AI reminder delivery: {aiMessage}");
+        
+        if (!isConnectionActive)
+        {
+            LogError("Cannot trigger AI reminder - no active connection");
+            
+            // Fall back to UI display only
+            if (companionUI != null)
+            {
+                companionUI.DisplayMessage(aiMessage, false);
+                companionUI.UpdateStatusText("Reminder delivered (no audio connection)");
+            }
+            return;
+        }
+        
+        try
+        {
+            // Create a text message event to send the AI reminder
+            var messageEvent = new
+            {
+                type = "conversation.item.create",
+                item = new
+                {
+                    type = "message",
+                    role = "assistant",
+                    content = new[]
+                    {
+                        new { type = "text", text = aiMessage }
+                    }
+                }
+            };
+            
+            string messageJson = JsonConvert.SerializeObject(messageEvent);
+            
+            // Send through data channel
+            if (dataChannel != null && dataChannel.ReadyState == RTCDataChannelState.Open)
+            {
+                byte[] messageBytes = Encoding.UTF8.GetBytes(messageJson);
+                dataChannel.Send(messageBytes);
+                
+                LogMessage($"✅ Sent AI reminder message through data channel");
+                
+                // Also trigger response generation
+                var responseEvent = new
+                {
+                    type = "response.create",
+                    response = new
+                    {
+                        modalities = new[] { "text", "audio" },
+                        instructions = "You just delivered a reminder to the user. Speak this message naturally and warmly."
+                    }
+                };
+                
+                string responseJson = JsonConvert.SerializeObject(responseEvent);
+                byte[] responseBytes = Encoding.UTF8.GetBytes(responseJson);
+                dataChannel.Send(responseBytes);
+                
+                // Update UI to show AI is speaking
+                if (companionUI != null)
+                {
+                    companionUI.DisplayMessage(aiMessage, false);
+                    companionUI.SetToPlayingAudioState();
+                    companionUI.UpdateStatusText("Delivering your reminder...");
+                }
+            }
+            else
+            {
+                LogError("Data channel not available for reminder delivery");
+                
+                // Fall back to UI display
+                if (companionUI != null)
+                {
+                    companionUI.DisplayMessage(aiMessage, false);
+                    companionUI.UpdateStatusText("Reminder delivered (audio unavailable)");
+                }
+            }
+        }
+        catch (Exception e)
+        {
+            LogError($"Failed to trigger AI reminder delivery: {e.Message}");
+            
+            // Fall back to UI display
+            if (companionUI != null)
+            {
+                companionUI.DisplayMessage(aiMessage, false);
+                companionUI.UpdateStatusText("Reminder delivered (fallback mode)");
+            }
+        }
+    }
+    
     // Public properties
     public bool IsConnected => isConnectionActive;
     public bool IsTalking => isTalking;
