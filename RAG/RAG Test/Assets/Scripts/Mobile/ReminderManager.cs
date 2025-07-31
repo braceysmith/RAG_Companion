@@ -367,7 +367,8 @@ public class ReminderManager : MonoBehaviour
                     }
                     else
                     {
-                        Debug.LogError($"AI reminder delivery failed: {response.ContainsKey("message") ? response["message"] : "Unknown error"}");
+                        string errorMessage = response.ContainsKey("message") ? response["message"].ToString() : "Unknown error";
+                        Debug.LogError($"AI reminder delivery failed: {errorMessage}");
                     }
                 }
                 catch (System.Exception e)
