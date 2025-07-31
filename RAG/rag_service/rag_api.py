@@ -464,7 +464,7 @@ def extract_personal_info(message: str) -> dict:
 def parse_reminder_request(remainder: str, pattern_type: str) -> dict:
     """Parse natural language reminder requests"""
     import re
-    from datetime import datetime, timedelta
+    from datetime import datetime, timedelta, timezone
     try:
         import dateutil.parser as date_parser
     except ImportError:
@@ -508,18 +508,21 @@ def parse_reminder_request(remainder: str, pattern_type: str) -> dict:
                     if time_type == "relative":
                         amount = int(match.group(1))
                         unit = match.group(2)
+                        # Use UTC time consistently to avoid timezone issues
+                        utc_now = datetime.now(timezone.utc)
                         if unit.startswith("minute"):
-                            reminder_data["datetime"] = datetime.now() + timedelta(minutes=amount)
-                            print(f"⏰ Reminder set for: {reminder_data['datetime']} (in {amount} minutes)")
+                            reminder_data["datetime"] = utc_now + timedelta(minutes=amount)
+                            print(f"⏰ Reminder set for: {reminder_data['datetime']} UTC (in {amount} minutes)")
                         elif unit.startswith("hour"):
-                            reminder_data["datetime"] = datetime.now() + timedelta(hours=amount)
+                            reminder_data["datetime"] = utc_now + timedelta(hours=amount)
                         elif unit.startswith("day"):
-                            reminder_data["datetime"] = datetime.now() + timedelta(days=amount)
+                            reminder_data["datetime"] = utc_now + timedelta(days=amount)
                         elif unit.startswith("week"):
-                            reminder_data["datetime"] = datetime.now() + timedelta(weeks=amount)
+                            reminder_data["datetime"] = utc_now + timedelta(weeks=amount)
                     elif time_type == "tomorrow":
                         time_part = match.group(1) if len(match.groups()) > 0 else "9:00 AM"
-                        tomorrow = datetime.now() + timedelta(days=1)
+                        utc_now = datetime.now(timezone.utc)
+                        tomorrow = utc_now + timedelta(days=1)
                         if date_parser:
                             reminder_data["datetime"] = date_parser.parse(f"{tomorrow.strftime('%Y-%m-%d')} {time_part}")
                         else:
@@ -530,8 +533,8 @@ def parse_reminder_request(remainder: str, pattern_type: str) -> dict:
                         if date_parser:
                             reminder_data["datetime"] = date_parser.parse(match.group(0))
                         else:
-                            # Simple fallback - default to 1 hour from now
-                            reminder_data["datetime"] = datetime.now() + timedelta(hours=1)
+                            # Simple fallback - default to 1 hour from now (UTC)
+                            reminder_data["datetime"] = datetime.now(timezone.utc) + timedelta(hours=1)
                     
                     time_found = True
                     # Remove the time part from the content
@@ -540,9 +543,9 @@ def parse_reminder_request(remainder: str, pattern_type: str) -> dict:
                 except:
                     continue
         
-        # If no specific time found, set default reminder for 1 hour from now
+        # If no specific time found, set default reminder for 1 hour from now (UTC)
         if not time_found:
-            reminder_data["datetime"] = datetime.now() + timedelta(hours=1)
+            reminder_data["datetime"] = datetime.now(timezone.utc) + timedelta(hours=1)
             
         # Clean up the reminder content
         remainder = remainder.strip()
@@ -588,19 +591,25 @@ def store_reminder(user_id: str, reminder_data: dict) -> str:
 
 def get_due_reminders(user_id: str) -> list:
     """Get reminders that are due for a user"""
-    from datetime import datetime
+    from datetime import datetime, timezone
     
     if user_id not in user_reminders:
         return []
     
     due_reminders = []
-    now = datetime.now()
+    now = datetime.now(timezone.utc)
     
-    print(f"🕐 Checking reminders at {now}")
+    print(f"🕐 Checking reminders at {now} UTC")
     print(f"🔍 User {user_id} has {len(user_reminders[user_id])} total reminders")
     
     for reminder in user_reminders[user_id]:
         reminder_time = reminder["datetime"]
+        
+        # Ensure both times are timezone-aware for proper comparison
+        if reminder_time.tzinfo is None:
+            # If reminder time is naive, assume it's UTC
+            reminder_time = reminder_time.replace(tzinfo=timezone.utc)
+        
         is_due = reminder_time <= now
         time_diff = (reminder_time - now).total_seconds()
         print(f"  📝 Reminder: '{reminder['content']}' due at {reminder_time}, triggered: {reminder['triggered']}, is_due: {is_due}")
@@ -1491,15 +1500,16 @@ def delete_reminder(user_id: str, reminder_id: str):
 def create_test_reminder(user_id: str):
     """Create an immediately due test reminder for testing"""
     try:
-        from datetime import datetime
+        from datetime import datetime, timezone
         import uuid
         
         # Create a test reminder that's immediately due
+        utc_now = datetime.now(timezone.utc)
         test_reminder = {
             "id": str(uuid.uuid4()),
             "content": f"Test reminder for {user_id} - this is a test of the proactive delivery system",
-            "datetime": datetime.now(),  # Due immediately
-            "created_at": datetime.now(),
+            "datetime": utc_now,  # Due immediately
+            "created_at": utc_now,
             "triggered": False
         }
         
@@ -1529,18 +1539,25 @@ def create_test_reminder(user_id: str):
 async def deliver_due_reminders(user_id: str):
     """Generate AI message to deliver due reminders to user"""
     try:
-        from datetime import datetime
+        from datetime import datetime, timezone
         import asyncio
         
         if user_id not in user_reminders:
             return {"status": "no_reminders", "message": "No reminders found for user"}
         
-        now = datetime.now()
+        now = datetime.now(timezone.utc)
         due_reminders = []
         
         # Find all due reminders (not yet triggered)
         for reminder in user_reminders[user_id]:
-            if not reminder["triggered"] and reminder["datetime"] <= now:
+            reminder_time = reminder["datetime"]
+            
+            # Ensure both times are timezone-aware for proper comparison
+            if reminder_time.tzinfo is None:
+                # If reminder time is naive, assume it's UTC
+                reminder_time = reminder_time.replace(tzinfo=timezone.utc)
+            
+            if not reminder["triggered"] and reminder_time <= now:
                 due_reminders.append(reminder)
                 # Mark as triggered to prevent duplicate delivery
                 reminder["triggered"] = True
