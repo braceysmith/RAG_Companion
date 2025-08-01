@@ -510,7 +510,9 @@ def parse_reminder_request(remainder: str, pattern_type: str) -> dict:
             (r"at (\d{1,2}:\d{2})\s*(am|pm)?", "time"),
             (r"at (\d{1,2})\s*(am|pm)", "time"),
             
-            # Relative times  
+            # Relative times with word numbers
+            (r"in (one|two|three|four|five|six|seven|eight|nine|ten|fifteen|twenty|thirty) (minute|hour|day|week)s?", "relative_word"),
+            (r"in a (minute|hour|day|week)", "relative_single"),
             (r"in (\d+) (minute|hour|day|week)s?", "relative"),
             (r"tomorrow at (\d{1,2}:\d{2})\s*(am|pm)?", "tomorrow"),
             (r"tomorrow", "tomorrow"),
@@ -542,6 +544,39 @@ def parse_reminder_request(remainder: str, pattern_type: str) -> dict:
                             reminder_data["datetime"] = utc_now + timedelta(days=amount)
                         elif unit.startswith("week"):
                             reminder_data["datetime"] = utc_now + timedelta(weeks=amount)
+                    elif time_type == "relative_word":
+                        # Convert word numbers to integers
+                        word_to_number = {
+                            "one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
+                            "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10,
+                            "fifteen": 15, "twenty": 20, "thirty": 30
+                        }
+                        word_amount = match.group(1).lower()
+                        amount = word_to_number.get(word_amount, 1)
+                        unit = match.group(2)
+                        utc_now = datetime.now(timezone.utc)
+                        if unit.startswith("minute"):
+                            reminder_data["datetime"] = utc_now + timedelta(minutes=amount)
+                            print(f"⏰ Reminder set for: {reminder_data['datetime']} UTC (in {amount} minutes from server time)")
+                        elif unit.startswith("hour"):
+                            reminder_data["datetime"] = utc_now + timedelta(hours=amount)
+                        elif unit.startswith("day"):
+                            reminder_data["datetime"] = utc_now + timedelta(days=amount)
+                        elif unit.startswith("week"):
+                            reminder_data["datetime"] = utc_now + timedelta(weeks=amount)
+                    elif time_type == "relative_single":
+                        # "in a minute", "in an hour", etc.
+                        unit = match.group(1)
+                        utc_now = datetime.now(timezone.utc)
+                        if unit.startswith("minute"):
+                            reminder_data["datetime"] = utc_now + timedelta(minutes=1)
+                            print(f"⏰ Reminder set for: {reminder_data['datetime']} UTC (in 1 minute from server time)")
+                        elif unit.startswith("hour"):
+                            reminder_data["datetime"] = utc_now + timedelta(hours=1)
+                        elif unit.startswith("day"):
+                            reminder_data["datetime"] = utc_now + timedelta(days=1)
+                        elif unit.startswith("week"):
+                            reminder_data["datetime"] = utc_now + timedelta(weeks=1)
                     elif time_type == "tomorrow":
                         time_part = match.group(1) if len(match.groups()) > 0 else "9:00 AM"
                         utc_now = datetime.now(timezone.utc)
