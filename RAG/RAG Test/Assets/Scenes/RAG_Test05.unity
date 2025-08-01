@@ -2026,7 +2026,7 @@ MonoBehaviour:
   reminderNotificationPanel: {fileID: 521875408}
   reminderText: {fileID: 45160813}
   reminderTimeText: {fileID: 1008069451}
-  enableMobileNotifications: 0
+  enableMobileNotifications: 1
 --- !u!114 &630904273
 MonoBehaviour:
   m_ObjectHideFlags: 0

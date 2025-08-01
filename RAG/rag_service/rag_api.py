@@ -677,9 +677,8 @@ def get_due_reminders(user_id: str) -> list:
         print(f"    ⏱️  Time difference: {time_diff:.1f} seconds ({time_diff/60:.1f} minutes)")
         
         if not reminder["triggered"] and is_due:
-            reminder["triggered"] = True  # Mark as triggered
             due_reminders.append(reminder)
-            print(f"  ✅ Marking reminder as due: {reminder['id']}")
+            print(f"  ✅ Found due reminder: {reminder['id']} (not yet triggered)")
     
     print(f"📅 Found {len(due_reminders)} due reminders")
     return due_reminders
@@ -1655,14 +1654,13 @@ async def deliver_due_reminders(user_id: str):
             
             if not reminder["triggered"] and reminder_time <= now:
                 due_reminders.append(reminder)
-                # Mark as triggered to prevent duplicate delivery
-                reminder["triggered"] = True
+                # Don't mark as triggered yet - wait for successful delivery
         
         if not due_reminders:
             return {"status": "no_due_reminders", "message": "No due reminders to deliver"}
         
         # Get user profile for personalized delivery
-        user_profile = get_user_profile(user_id)
+        user_profile = await get_user_profile(user_id)
         user_name = user_profile.get("name", "").split()[0] if user_profile.get("name") else ""
         
         # Create context for AI to deliver reminders
@@ -1701,6 +1699,11 @@ Keep it conversational and personal. Don't mention "delivering reminders" - just
             )
             
             ai_message = response.choices[0].message.content.strip()
+            
+            # NOW mark reminders as triggered after successful AI generation
+            for reminder in due_reminders:
+                reminder["triggered"] = True
+                print(f"✅ Marked reminder {reminder['id']} as triggered after successful AI delivery")
             
             # Store this as a conversation turn
             store_conversation_turn(user_id, "[User opened app - checking for reminders]", ai_message)
