@@ -432,11 +432,14 @@ def extract_personal_info(message: str) -> dict:
         ("remind me on ", "reminder_on"),
         ("remind me in ", "reminder"),  # Added this!
         ("remind me of ", "reminder"),  # Added this!
+        ("remind me ", "reminder"),     # Catch-all pattern for "remind me [anything]"
         ("please remind me to ", "reminder"),  # Added this!
         ("please remind me of ", "reminder"),  # Added this!
         ("please remind me in ", "reminder"),  # Added this!
+        ("please remind me ", "reminder"),     # Catch-all for "please remind me [anything]"
         ("can you remind me in ", "reminder"),  # Added this!
         ("can you remind me to ", "reminder"),  # Added this!
+        ("can you remind me ", "reminder"),     # Catch-all for "can you remind me [anything]"
         ("don't let me forget to ", "reminder"),
         ("i need to remember to ", "reminder"),
         ("set a reminder for ", "reminder"),
