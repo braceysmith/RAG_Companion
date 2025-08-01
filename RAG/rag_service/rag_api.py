@@ -182,6 +182,29 @@ def debug_endpoint():
     except Exception as e:
         return {"status": "error", "error": str(e)}
 
+@app.get("/time/sync")
+def get_server_time():
+    """Get current server time for client synchronization"""
+    try:
+        from datetime import datetime, timezone
+        import time
+        
+        # Get both Unix timestamp and ISO format for flexibility
+        utc_now = datetime.now(timezone.utc)
+        unix_timestamp = time.time()
+        
+        return {
+            "status": "success",
+            "server_time": {
+                "utc_iso": utc_now.isoformat(),
+                "unix_timestamp": unix_timestamp,
+                "utc_datetime": utc_now.strftime("%Y-%m-%d %H:%M:%S UTC")
+            },
+            "message": "Server time retrieved successfully"
+        }
+    except Exception as e:
+        return {"status": "error", "message": f"Failed to get server time: {str(e)}"}
+
 @app.get("/user/{user_id}/profile")
 def get_user_profile_simple(user_id: str):
     """Get stored profile information for a user"""
@@ -512,7 +535,7 @@ def parse_reminder_request(remainder: str, pattern_type: str) -> dict:
                         utc_now = datetime.now(timezone.utc)
                         if unit.startswith("minute"):
                             reminder_data["datetime"] = utc_now + timedelta(minutes=amount)
-                            print(f"⏰ Reminder set for: {reminder_data['datetime']} UTC (in {amount} minutes)")
+                            print(f"⏰ Reminder set for: {reminder_data['datetime']} UTC (in {amount} minutes from server time)")
                         elif unit.startswith("hour"):
                             reminder_data["datetime"] = utc_now + timedelta(hours=amount)
                         elif unit.startswith("day"):

@@ -53,7 +53,36 @@ public class ReminderManager : MonoBehaviour
     
     void Start()
     {
-        // Check for reminders on app startup
+        // Wait for time sync before starting reminder operations
+        StartCoroutine(InitializeWithTimeSync());
+    }
+    
+    IEnumerator InitializeWithTimeSync()
+    {
+        // Wait for TimeSyncManager to be available
+        while (TimeSyncManager.Instance == null)
+        {
+            yield return new WaitForSeconds(0.1f);
+        }
+        
+        // Wait for time synchronization to complete (max 15 seconds)
+        float waitTime = 0f;
+        while (!TimeSyncManager.Instance.IsTimeSynchronized() && waitTime < 15f)
+        {
+            yield return new WaitForSeconds(0.5f);
+            waitTime += 0.5f;
+        }
+        
+        if (TimeSyncManager.Instance.IsTimeSynchronized())
+        {
+            Debug.Log($"🕐 ReminderManager initialized with synchronized time (offset: {TimeSyncManager.Instance.GetTimeOffsetSeconds():F1}s)");
+        }
+        else
+        {
+            Debug.LogWarning("⚠️ ReminderManager starting without time sync - may have timing issues");
+        }
+        
+        // Now start reminder operations
         StartCoroutine(CheckRemindersOnStartup());
         
         // Start periodic reminder checking
