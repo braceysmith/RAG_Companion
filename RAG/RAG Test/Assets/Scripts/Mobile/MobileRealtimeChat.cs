@@ -1835,6 +1835,31 @@ public class MobileRealtimeChat : MonoBehaviour
         LogMessage($"- Has WebRTC Track: {remoteAudioSource.clip != null}");
     }
     
+    // Test method for UI button - triggers a simple AI response to verify the system works
+    public void TestAIResponse()
+    {
+        string testMessage = "Hello! This is a test response to verify the AI audio system is working correctly. If you can hear this message, then proactive AI delivery is functioning properly.";
+        
+        LogMessage($"🧪 TEST: Triggering test AI response");
+        
+        if (!isConnectionActive)
+        {
+            LogError("Cannot test AI response - no active connection. Please tap 'MIC Talk' first to establish connection.");
+            
+            if (companionUI != null)
+            {
+                companionUI.AddMessage("⚠️ No Connection: Please tap 'MIC Talk' first to establish WebRTC connection, then try the test button.", "system", false);
+                companionUI.UpdateStatusText("Connection required for audio test");
+            }
+            return;
+        }
+        
+        // Use the same delivery mechanism as reminders
+        TriggerAIReminderDelivery(testMessage);
+        
+        LogMessage($"✅ Test AI response triggered - should hear audio if system is working");
+    }
+    
     // Trigger AI to deliver reminder messages proactively
     public void TriggerAIReminderDelivery(string aiMessage)
     {

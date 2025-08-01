@@ -434,6 +434,7 @@
 "Assets/Scripts/Audio/AvatarSpeechController.cs"
 "Assets/Scripts/CompanionInputHandler.cs"
 "Assets/Scripts/CompanionUI.cs"
+"Assets/Scripts/Mobile/ManagerSetup.cs"
 "Assets/Scripts/Mobile/MobileAudioManager.cs"
 "Assets/Scripts/Mobile/MobileAuthManager.cs"
 "Assets/Scripts/Mobile/MobileCompanionUI.cs"
