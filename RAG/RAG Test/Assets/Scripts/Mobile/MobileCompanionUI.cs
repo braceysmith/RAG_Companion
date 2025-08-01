@@ -65,7 +65,6 @@ public class MobileCompanionUI : MonoBehaviour
     private bool isPlayingAudio = false;
     private bool pendingVoiceInputStart = false; // Track if user wants to start voice input
     private Coroutine connectionTimeoutCoroutine; // Track connection timeout
-    private bool isInterrupting = false; // Track if we're in interruption mode
     
     // Component references
     private MobileRAGCompanionSystem companionSystem;
@@ -821,7 +820,7 @@ public class MobileCompanionUI : MonoBehaviour
         LogMessage($"=== INTERRUPTION STARTED === Current state: {currentState}");
         
         // Set interruption flag to prevent unwanted state changes
-        isInterrupting = true;
+        // (interruption tracking removed as it wasn't being used)
         
         try
         {
@@ -874,7 +873,7 @@ public class MobileCompanionUI : MonoBehaviour
         finally
         {
             // Clear interruption flag
-            isInterrupting = false;
+            // (interruption tracking removed as it wasn't being used)
         }
     }
     

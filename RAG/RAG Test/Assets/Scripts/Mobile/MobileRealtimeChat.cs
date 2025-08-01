@@ -24,6 +24,14 @@ public class MobileRealtimeChat : MonoBehaviour
     [SerializeField] private bool enableRAGContext = true; // Now enabled for conversation memory
     [SerializeField] private int maxRAGResults = 3;
     
+    [Header("Auto-Connection")]
+    [SerializeField] private bool autoConnectOnStart = true; // Automatically establish WebRTC connection on app start
+    [SerializeField] private float autoConnectDelay = 2f; // Delay before starting auto-connection (seconds)
+    
+    [Header("Auto-Greeting")]
+    [SerializeField] private bool enableAutoGreeting = true; // Automatically greet user when connection is established
+    [SerializeField] private float greetingDelay = 1.5f; // Delay before greeting (seconds)
+    
     [Header("Reminder Integration")]
     [SerializeField] private bool enableReminders = true;
     [SerializeField] private ReminderManager reminderManager;
@@ -76,6 +84,17 @@ public class MobileRealtimeChat : MonoBehaviour
         AudioSettings.Reset(audioConfig);
         
         InitializeMobileRealtime();
+        
+        // Auto-connect to WebRTC if enabled
+        if (autoConnectOnStart)
+        {
+            LogMessage($"🔗 Auto-connect enabled - will establish WebRTC connection in {autoConnectDelay} seconds");
+            StartCoroutine(DelayedAutoConnect());
+        }
+        else
+        {
+            LogMessage("🔗 Auto-connect disabled - WebRTC connection requires manual activation");
+        }
         
         // Initialize reminder integration
         if (enableReminders && reminderManager == null)
@@ -197,7 +216,219 @@ public class MobileRealtimeChat : MonoBehaviour
         LogMessage($"User ID: {userId}");
         LogMessage($"=== END RAG STATUS ===");
         
+        // Connection will be initiated by auto-connect or manual trigger
+    }
+    
+    private IEnumerator DelayedAutoConnect()
+    {
+        LogMessage($"⏳ Waiting {autoConnectDelay} seconds before auto-connecting...");
+        yield return new WaitForSeconds(autoConnectDelay);
+        
+        if (isConnectionActive)
+        {
+            LogMessage("✅ WebRTC connection already active - skipping auto-connect");
+            yield break;
+        }
+        
+        LogMessage("🔗 Starting automatic WebRTC connection...");
+        
+        // Request microphone permissions first (important for mobile)
+        if (Application.isMobilePlatform)
+        {
+            LogMessage("📱 Requesting microphone permissions for mobile...");
+            if (!Application.HasUserAuthorization(UserAuthorization.Microphone))
+            {
+                yield return Application.RequestUserAuthorization(UserAuthorization.Microphone);
+                
+                if (!Application.HasUserAuthorization(UserAuthorization.Microphone))
+                {
+                    LogError("❌ Microphone permission denied - cannot auto-connect");
+                    if (companionUI != null)
+                    {
+                        companionUI.UpdateStatusText("Microphone permission required for voice features");
+                    }
+                    yield break;
+                }
+            }
+        }
+        
+        // Start the connection
         StartCoroutine(CreateSessionAndConnect());
+        
+        // Wait a bit and check if connection succeeded
+        yield return new WaitForSeconds(5f);
+        
+        if (isConnectionActive)
+        {
+            LogMessage("✅ Auto-connect successful - WebRTC connection established");
+            if (companionUI != null)
+            {
+                companionUI.UpdateStatusText("Voice connection ready");
+            }
+        }
+        else
+        {
+            LogMessage("⚠️ Auto-connect failed - connection not established within timeout");
+            if (companionUI != null)
+            {
+                companionUI.UpdateStatusText("Voice connection failed - tap MIC Talk to retry");
+            }
+        }
+    }
+    
+    private IEnumerator DelayedAutoGreeting()
+    {
+        LogMessage($"⏳ Waiting {greetingDelay} seconds before greeting user...");
+        yield return new WaitForSeconds(greetingDelay);
+        
+        if (!isConnectionActive)
+        {
+            LogMessage("⚠️ Connection lost before greeting could be delivered");
+            yield break;
+        }
+        
+        LogMessage("🤝 Generating personalized greeting...");
+        
+        // Get user's name from RAG system using coroutine
+        yield return StartCoroutine(GetUserNameCoroutine((userName) => {
+            // Generate appropriate greeting based on whether we know the name
+            string greetingMessage = GenerateGreetingMessage(userName);
+            
+            LogMessage($"📢 Delivering greeting: {greetingMessage}");
+            
+            // Deliver greeting directly through voice system (bypassing full AI conversation)
+            TriggerDirectAIMessage(greetingMessage);
+        }));
+    }
+    
+    private IEnumerator GetUserNameCoroutine(System.Action<string> callback)
+    {
+        string userName = "";
+        
+        if (!enableRAGContext)
+        {
+            LogMessage("RAG not available - cannot retrieve user name");
+            callback?.Invoke("");
+            yield break;
+        }
+        
+        // Try to get user profile from server
+        using (UnityWebRequest request = UnityWebRequest.Get($"{ragApiUrl}/user/profile/{userId}"))
+        {
+            yield return request.SendWebRequest();
+            
+            if (request.result == UnityWebRequest.Result.Success)
+            {
+                try
+                {
+                    var response = JsonConvert.DeserializeObject<Dictionary<string, object>>(request.downloadHandler.text);
+                    
+                    if (response.ContainsKey("profile_memories"))
+                    {
+                        var profileMemories = response["profile_memories"] as Newtonsoft.Json.Linq.JArray;
+                        
+                        // Look for name in profile memories
+                        foreach (var memory in profileMemories)
+                        {
+                            var metadata = memory["metadata"];
+                            if (metadata != null && metadata["type"]?.ToString() == "name")
+                            {
+                                string name = metadata["name"]?.ToString();
+                                if (!string.IsNullOrEmpty(name))
+                                {
+                                    LogMessage($"✅ Found user name: {name}");
+                                    userName = name.Split(' ')[0]; // Use first name only
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+                catch (System.Exception parseEx)
+                {
+                    LogMessage($"Error parsing user profile response: {parseEx.Message}");
+                }
+            }
+            else
+            {
+                LogMessage($"Failed to get user profile: {request.error}");
+            }
+        }
+        
+        if (string.IsNullOrEmpty(userName))
+        {
+            LogMessage("No user name found in profile");
+        }
+        
+        callback?.Invoke(userName);
+    }
+    
+    private string GenerateGreetingMessage(string userName)
+    {
+        if (!string.IsNullOrEmpty(userName))
+        {
+            // Personalized greeting with known name
+            string[] personalizedGreetings = {
+                $"Hello {userName}! Great to see you again. How can I help you today?",
+                $"Hi {userName}! Welcome back. What would you like to talk about?",
+                $"Hey {userName}! I'm here and ready to chat. What's on your mind?",
+                $"Good to see you, {userName}! How are you doing today?",
+                $"Hello {userName}! I'm here to help. What can I do for you?"
+            };
+            
+            return personalizedGreetings[UnityEngine.Random.Range(0, personalizedGreetings.Length)];
+        }
+        else
+        {
+            // Generic greeting that asks for name
+            string[] introductoryGreetings = {
+                "Hello! I'm your AI companion. I'm here to help with conversations, reminders, and more. What's your name?",
+                "Hi there! Great to meet you. I'm your personal AI assistant. Could you tell me your name so I can address you properly?",
+                "Welcome! I'm excited to be your AI companion. I can help with conversations and reminders. What should I call you?",
+                "Hello! I'm here to chat, help with reminders, and assist you. What's your name so we can get better acquainted?",
+                "Hi! I'm your AI companion, ready to help with whatever you need. Could you share your name with me?"
+            };
+            
+            return introductoryGreetings[UnityEngine.Random.Range(0, introductoryGreetings.Length)];
+        }
+    }
+    
+    /// <summary>
+    /// Manually establish WebRTC connection - can be called from UI button
+    /// </summary>
+    public void ConnectToRealtime()
+    {
+        if (isConnectionActive)
+        {
+            LogMessage("✅ WebRTC connection already active");
+            return;
+        }
+        
+        LogMessage("🔗 Manual WebRTC connection requested...");
+        StartCoroutine(CreateSessionAndConnect());
+    }
+    
+    /// <summary>
+    /// Check if WebRTC connection is active - useful for UI state
+    /// </summary>
+    public bool IsWebRTCConnected()
+    {
+        return isConnectionActive;
+    }
+    
+    /// <summary>
+    /// Manually trigger a greeting - useful for testing or re-greeting
+    /// </summary>
+    public void TriggerGreeting()
+    {
+        if (!isConnectionActive)
+        {
+            LogError("Cannot trigger greeting - WebRTC connection not active");
+            return;
+        }
+        
+        LogMessage("🤝 Manual greeting triggered");
+        StartCoroutine(DelayedAutoGreeting());
     }
     
     public void StartVoiceInput()
@@ -522,6 +753,13 @@ public class MobileRealtimeChat : MonoBehaviour
             SendSessionConfiguration();
             
             LogMessage("Invoking OnConnectionEstablished event");
+            
+            // Trigger auto-greeting if enabled
+            if (enableAutoGreeting)
+            {
+                LogMessage("🤝 Auto-greeting enabled - will greet user in a moment");
+                StartCoroutine(DelayedAutoGreeting());
+            }
             // Notify connection established
             OnConnectionEstablished?.Invoke();
         };
@@ -831,9 +1069,9 @@ public class MobileRealtimeChat : MonoBehaviour
     private void HandleResponseComplete()
     {
         isAIResponding = false;
-        LogMessage("AI response completed - ready for next turn");
+        LogMessage("✅ AI response COMPLETELY finished - resetting to idle state");
         
-        // Reset to idle state for next conversation turn
+        // NOW it's safe to reset UI state - the entire response is done
         if (companionUI != null)
         {
             companionUI.ShowAudioPlaybackIndicator(false);
@@ -1438,13 +1676,12 @@ public class MobileRealtimeChat : MonoBehaviour
     {
         LogMessage("AI audio buffer chunk stopped - continuing to wait for response.done");
         
-        // Don't reset UI state here - this just means one audio chunk ended
-        // The complete response.done event will handle final state transition
-        // Just hide the audio playback indicator temporarily
-        if (companionUI != null)
-        {
-            companionUI.ShowAudioPlaybackIndicator(false);
-        }
+        // IMPORTANT: Don't reset UI state here! This just means one audio chunk ended.
+        // The AI might still be generating more audio chunks.
+        // Only response.done should reset the UI state.
+        
+        // Keep the audio playback indicator active until response.done
+        // This prevents premature audio cutoff
     }
     
     private void HandleResponseCancelled(JObject message)
@@ -1854,10 +2091,84 @@ public class MobileRealtimeChat : MonoBehaviour
             return;
         }
         
-        // Use the same delivery mechanism as reminders
-        TriggerAIReminderDelivery(testMessage);
+        // Use direct message delivery for test (bypasses full conversation system)
+        TriggerDirectAIMessage(testMessage);
         
         LogMessage($"✅ Test AI response triggered - should hear audio if system is working");
+    }
+    
+    // Trigger AI to speak a message directly without full conversation processing
+    public void TriggerDirectAIMessage(string message)
+    {
+        LogMessage($"🗣️ Triggering direct AI message: {message}");
+        
+        if (!isConnectionActive)
+        {
+            LogError("Cannot deliver direct message - no active connection");
+            
+            // Fall back to UI display only
+            if (companionUI != null)
+            {
+                companionUI.AddMessage(message, "assistant", true);
+                companionUI.UpdateStatusText("Message delivered (no audio connection)");
+            }
+            return;
+        }
+        
+        try
+        {
+            // Create a simple response event to make AI speak the message directly
+            var responseEvent = new
+            {
+                type = "response.create",
+                response = new
+                {
+                    modalities = new[] { "text", "audio" },
+                    instructions = $"Simply say this message exactly as written, in a warm and friendly tone: '{message}'"
+                }
+            };
+            
+            string responseJson = JsonConvert.SerializeObject(responseEvent);
+            
+            // Send through data channel
+            if (dataChannel != null && dataChannel.ReadyState == RTCDataChannelState.Open)
+            {
+                byte[] responseBytes = Encoding.UTF8.GetBytes(responseJson);
+                dataChannel.Send(responseBytes);
+                
+                LogMessage($"✅ Sent direct AI message through data channel");
+                
+                // Update UI to show AI is speaking
+                if (companionUI != null)
+                {
+                    companionUI.AddMessage(message, "assistant", true);
+                    companionUI.SetToPlayingAudioState();
+                    companionUI.UpdateStatusText("AI is speaking...");
+                }
+            }
+            else
+            {
+                LogError("Data channel not available for direct message delivery");
+                
+                // Fall back to UI display
+                if (companionUI != null)
+                {
+                    companionUI.AddMessage(message, "assistant", true);
+                    companionUI.UpdateStatusText("Message delivered (audio unavailable)");
+                }
+            }
+        }
+        catch (System.Exception e)
+        {
+            LogError($"Failed to trigger direct AI message: {e.Message}");
+            
+            // Fall back to UI display
+            if (companionUI != null)
+            {
+                companionUI.AddMessage(message, "assistant", true);
+                companionUI.UpdateStatusText("Message delivered (fallback mode)");
+            }
+        }
     }
     
     // Trigger AI to deliver reminder messages proactively
