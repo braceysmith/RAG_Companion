@@ -6,6 +6,7 @@ Library/Bee/artifacts/mvdfrm/Unity.Burst.Editor.ref.dll_EA1A6D1CB62C8BFD.mvfrm
 Library/Bee/artifacts/mvdfrm/Unity.Burst.ref.dll_A43E80D48102A6F4.mvfrm
 Library/Bee/artifacts/mvdfrm/Unity.Collections.Editor.ref.dll_94629FB7B2A83F68.mvfrm
 Library/Bee/artifacts/mvdfrm/Unity.Collections.ref.dll_CB2B1FA2A63FF8D9.mvfrm
+Library/Bee/artifacts/mvdfrm/Unity.EditorCoroutines.Editor.ref.dll_728C78151872B5E7.mvfrm
 Library/Bee/artifacts/mvdfrm/Unity.InputSystem.ForUI.ref.dll_AAF6E30B590FA4FC.mvfrm
 Library/Bee/artifacts/mvdfrm/Unity.InputSystem.ref.dll_62EC740DD3AB3A8D.mvfrm
 Library/Bee/artifacts/mvdfrm/Unity.Mathematics.Editor.ref.dll_4A3A50F3774BA9F7.mvfrm
@@ -44,6 +45,8 @@ Library/Bee/artifacts/mvdfrm/Unity.VisualScripting.Shared.Editor.ref.dll_CBD4E35
 Library/Bee/artifacts/mvdfrm/Unity.VisualScripting.State.Editor.ref.dll_BC6ADFF987BC82A3.mvfrm
 Library/Bee/artifacts/mvdfrm/Unity.VisualScripting.State.ref.dll_697AC546F729FDEE.mvfrm
 Library/Bee/artifacts/mvdfrm/Unity.VisualStudio.Editor.ref.dll_F37C0F1BA2EC04B9.mvfrm
+Library/Bee/artifacts/mvdfrm/Unity.WebRTC.Editor.ref.dll_881D001324447572.mvfrm
+Library/Bee/artifacts/mvdfrm/Unity.WebRTC.ref.dll_5E6573F738656A2F.mvfrm
 Library/Bee/artifacts/mvdfrm/UnityEditor.TestRunner.ref.dll_DE1D13444BAAFBE7.mvfrm
 Library/Bee/artifacts/mvdfrm/UnityEditor.UI.ref.dll_BD0E97F52A0DF729.mvfrm
 Library/Bee/artifacts/mvdfrm/UnityEngine.TestRunner.ref.dll_AA3B5DF2776E59D2.mvfrm

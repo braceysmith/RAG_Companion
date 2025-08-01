@@ -17,7 +17,7 @@ MonoBehaviour:
   m_Subtarget: 0
   m_PlatformId: ad48d16a66894befa4d8181998c3cb09
   m_PlatformBuildProfile:
-    rid: 4150555620351148035
+    rid: 118261311902056449
   m_OverrideGlobalSceneList: 0
   m_Scenes: []
   m_ScriptingDefines: []
@@ -26,10 +26,10 @@ MonoBehaviour:
   references:
     version: 2
     RefIds:
-    - rid: 4150555620351148035
+    - rid: 118261311902056449
       type: {class: iOSPlatformSettings, ns: UnityEditor.iOS, asm: UnityEditor.iOS.Extensions}
       data:
-        m_Development: 0
+        m_Development: 1
         m_ConnectProfiler: 0
         m_BuildWithDeepProfilingSupport: 0
         m_AllowDebugging: 0
@@ -42,5 +42,5 @@ MonoBehaviour:
         m_InstallInBuildFolder: 0
         m_iOSXcodeBuildConfig: 1
         m_SymlinkSources: 0
-        m_PreferredXcode: 
+        m_PreferredXcode: 16.2_/Volumes/TREEHOUSE/Xcode.app
         m_SymlinkTrampoline: 0

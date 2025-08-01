@@ -5370,6 +5370,7 @@ m_ResolvedPackages:
     - 2.5.7
     - 2.6.0-exp.2
     - 2.6.0-pre.3
+    - 2.6.0-pre.4
     compatible:
     - 2.5.1
     - 2.5.2
@@ -5377,6 +5378,7 @@ m_ResolvedPackages:
     - 2.5.7
     - 2.6.0-exp.2
     - 2.6.0-pre.3
+    - 2.6.0-pre.4
     recommended: 2.5.7
     deprecated: []
   dependencies:

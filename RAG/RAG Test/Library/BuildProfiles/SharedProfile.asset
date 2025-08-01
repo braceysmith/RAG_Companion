@@ -17,7 +17,7 @@ MonoBehaviour:
   m_Subtarget: 0
   m_PlatformId: 00000000000000000000000000000000
   m_PlatformBuildProfile:
-    rid: 4150555620351148036
+    rid: 118261311902056451
   m_OverrideGlobalSceneList: 0
   m_Scenes: []
   m_ScriptingDefines: []
@@ -26,10 +26,10 @@ MonoBehaviour:
   references:
     version: 2
     RefIds:
-    - rid: 4150555620351148036
+    - rid: 118261311902056451
       type: {class: SharedPlatformSettings, ns: UnityEditor.Build.Profile, asm: UnityEditor.CoreModule}
       data:
-        m_Development: 0
+        m_Development: 1
         m_ConnectProfiler: 0
         m_BuildWithDeepProfilingSupport: 0
         m_AllowDebugging: 0
@@ -45,7 +45,7 @@ MonoBehaviour:
         m_ForceInstallation: 0
         m_iOSXcodeBuildConfig: 1
         m_SymlinkSources: 0
-        m_PreferredXcode: 
+        m_PreferredXcode: 16.2_/Volumes/TREEHOUSE/Xcode.app
         m_SymlinkTrampoline: 0
         m_RemoteDeviceInfo: 0
         m_RemoteDeviceAddress: 

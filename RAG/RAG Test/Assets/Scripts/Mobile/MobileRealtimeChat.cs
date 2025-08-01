@@ -313,7 +313,7 @@ public class MobileRealtimeChat : MonoBehaviour
         }
         
         // Try to get user profile from server
-        using (UnityWebRequest request = UnityWebRequest.Get($"{ragApiUrl}/user/profile/{userId}"))
+        using (UnityWebRequest request = UnityWebRequest.Get($"{ragApiUrl}/user/{userId}/profile"))
         {
             yield return request.SendWebRequest();
             
@@ -323,25 +323,20 @@ public class MobileRealtimeChat : MonoBehaviour
                 {
                     var response = JsonConvert.DeserializeObject<Dictionary<string, object>>(request.downloadHandler.text);
                     
-                    if (response.ContainsKey("profile_memories"))
+                    // Check for simple profile structure: {"profile": {"name": "Bracey"}, "has_name": true}
+                    if (response.ContainsKey("profile") && response["profile"] is Newtonsoft.Json.Linq.JObject profile)
                     {
-                        var profileMemories = response["profile_memories"] as Newtonsoft.Json.Linq.JArray;
-                        
-                        // Look for name in profile memories
-                        foreach (var memory in profileMemories)
+                        string name = profile["name"]?.ToString();
+                        if (!string.IsNullOrEmpty(name))
                         {
-                            var metadata = memory["metadata"];
-                            if (metadata != null && metadata["type"]?.ToString() == "name")
-                            {
-                                string name = metadata["name"]?.ToString();
-                                if (!string.IsNullOrEmpty(name))
-                                {
-                                    LogMessage($"✅ Found user name: {name}");
-                                    userName = name.Split(' ')[0]; // Use first name only
-                                    break;
-                                }
-                            }
+                            LogMessage($"✅ Found user name: {name}");
+                            userName = name.Split(' ')[0]; // Use first name only
                         }
+                    }
+                    // Also check for has_name flag to confirm name validity
+                    else if (response.ContainsKey("has_name") && response["has_name"].ToString().ToLower() == "false")
+                    {
+                        LogMessage("Profile indicates user has no stored name");
                     }
                 }
                 catch (System.Exception parseEx)

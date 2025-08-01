@@ -1971,7 +1971,7 @@ MonoBehaviour:
   enableBatteryOptimization: 1
   maxConcurrentRequests: 3
   mobileUI: {fileID: 950719299}
-  audioManager: {fileID: 0}
+  audioManager: {fileID: 1013747118}
   notificationManager: {fileID: 1059338973}
 --- !u!4 &630904270
 Transform:
@@ -2006,8 +2006,12 @@ MonoBehaviour:
   userId: mobile-bracey01
   enableRAGContext: 1
   maxRAGResults: 3
+  autoConnectOnStart: 1
+  autoConnectDelay: 2
+  enableAutoGreeting: 1
+  greetingDelay: 1.5
   enableReminders: 1
-  reminderManager: {fileID: 0}
+  reminderManager: {fileID: 630904272}
 --- !u!114 &630904272
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -2810,6 +2814,7 @@ GameObject:
   m_Component:
   - component: {fileID: 1013747117}
   - component: {fileID: 1013747115}
+  - component: {fileID: 1013747118}
   m_Layer: 0
   m_Name: Audio Manager
   m_TagString: Untagged
@@ -2929,6 +2934,28 @@ Transform:
   m_Children: []
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &1013747118
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1013747114}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 512aa497cea64488fbe3d4712739cd78, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  audioSource: {fileID: 1013747115}
+  sampleRate: 16000
+  maxRecordingLength: 30
+  silenceThreshold: 0.01
+  enableBatteryOptimization: 1
+  enableNoiseReduction: 1
+  enableVAD: 1
+  vadThreshold: 0.02
+  vadMinDuration: 0.5
+  vadMaxSilence: 2
 --- !u!1 &1053949569
 GameObject:
   m_ObjectHideFlags: 0
