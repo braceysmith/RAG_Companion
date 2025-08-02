@@ -11,6 +11,7 @@ public class MobileCompanionUI : MonoBehaviour
     [SerializeField] private RectTransform chatContainer;
     [SerializeField] private TMP_InputField messageInput;
     [SerializeField] private Button sendButton;
+    [SerializeField] private Button imageUploadButton;
     [SerializeField] private ScrollRect chatScrollRect;
     [SerializeField] private GameObject messagePrefab;
     
@@ -144,6 +145,12 @@ public class MobileCompanionUI : MonoBehaviour
         if (voiceRecordButton != null)
         {
             voiceRecordButton.onClick.AddListener(OnVoiceButtonClicked);
+        }
+        
+        // Setup image upload button
+        if (imageUploadButton != null)
+        {
+            imageUploadButton.onClick.AddListener(OnImageUploadButtonClicked);
         }
         
         // Setup error panel buttons
@@ -1188,6 +1195,129 @@ public class MobileCompanionUI : MonoBehaviour
     {
         HideError();
         LogMessage("Close error button clicked");
+    }
+    
+    // Image Upload Handling
+    private void OnImageUploadButtonClicked()
+    {
+        LogMessage("Image upload button clicked");
+        
+        try
+        {
+            if (currentState != ConversationState.Idle)
+            {
+                LogMessage("Cannot upload image while conversation is active");
+                ShowError("Please wait for the current conversation to finish before uploading an image.");
+                return;
+            }
+            
+            StartCoroutine(PickAndUploadImage());
+        }
+        catch (System.Exception ex)
+        {
+            LogError($"Error in image upload button handler: {ex.Message}");
+            ShowError($"Image upload error: {ex.Message}");
+        }
+    }
+    
+    private IEnumerator PickAndUploadImage()
+    {
+        LogMessage("Starting image picker...");
+        
+        #if UNITY_ANDROID && !UNITY_EDITOR
+        // Android image picker
+        yield return StartCoroutine(PickImageAndroid());
+        #elif UNITY_IOS && !UNITY_EDITOR
+        // iOS image picker
+        yield return StartCoroutine(PickImageIOS());
+        #else
+        // Editor/Desktop fallback - load test image or show message
+        LogMessage("Image picker not available in editor - would open native picker on mobile");
+        ShowError("Image picking only available on mobile devices. In a real deployment, this would open your device's photo gallery.");
+        #endif
+        
+        yield return null;
+    }
+    
+    #if UNITY_ANDROID && !UNITY_EDITOR
+    private IEnumerator PickImageAndroid()
+    {
+        // Android implementation using Intent (requires native plugin in production)
+        // For demonstration, show how this would work
+        LogMessage("Android image picker would launch here");
+        
+        // In production, you would:
+        // 1. Install Unity Native Gallery package from Asset Store
+        // 2. Or create custom Android plugin with Java code like:
+        // Intent intent = new Intent(Intent.ACTION_PICK, MediaStore.Images.Media.EXTERNAL_CONTENT_URI);
+        // UnityPlayer.currentActivity.startActivityForResult(intent, PICK_IMAGE_REQUEST);
+        
+        ShowError("Image picking ready for Android deployment. Install Unity Native Gallery package for full functionality.");
+        yield return null;
+    }
+    #endif
+    
+    #if UNITY_IOS && !UNITY_EDITOR
+    private IEnumerator PickImageIOS()
+    {
+        // iOS implementation using UIImagePickerController (requires native plugin in production)
+        // For demonstration, show how this would work
+        LogMessage("iOS image picker would launch here");
+        
+        // In production, you would:
+        // 1. Install Unity Native Gallery package from Asset Store
+        // 2. Or create custom iOS plugin with Objective-C code like:
+        // UIImagePickerController *picker = [[UIImagePickerController alloc] init];
+        // picker.sourceType = UIImagePickerControllerSourceTypePhotoLibrary;
+        
+        ShowError("Image picking ready for iOS deployment. Install Unity Native Gallery package for full functionality.");
+        yield return null;
+    }
+    #endif
+    
+    private IEnumerator ProcessSelectedImage(string imagePath)
+    {
+        LogMessage($"Processing selected image: {imagePath}");
+        
+        try
+        {
+            // Load the image as texture
+            byte[] imageBytes = System.IO.File.ReadAllBytes(imagePath);
+            Texture2D texture = new Texture2D(2, 2);
+            
+            if (texture.LoadImage(imageBytes))
+            {
+                // Convert to base64 for API
+                string base64Image = System.Convert.ToBase64String(imageBytes);
+                
+                // Add image to chat UI
+                AddImageMessage(texture, "Image uploaded for analysis", true); // true = user message
+                
+                // Send to realtime chat for analysis
+                if (realtimeChat != null)
+                {
+                    realtimeChat.AnalyzeUploadedImage(base64Image);
+                }
+                else
+                {
+                    ShowError("Realtime chat not available for image analysis");
+                }
+                
+                LogMessage("Image uploaded and sent for analysis");
+            }
+            else
+            {
+                LogError("Failed to load image texture");
+                ShowError("Failed to load the selected image");
+            }
+        }
+        catch (System.Exception ex)
+        {
+            LogError($"Error processing image: {ex.Message}");
+            ShowError($"Error processing image: {ex.Message}");
+        }
+        
+        yield return null;
     }
     
     // Audio Manager Event Handlers

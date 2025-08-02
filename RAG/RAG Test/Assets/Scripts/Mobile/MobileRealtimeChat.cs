@@ -2553,6 +2553,72 @@ public class MobileRealtimeChat : MonoBehaviour
     public bool IsAIResponding => isAIResponding;
     public AudioSource RemoteAudioSource => remoteAudioSource;
     
+    // Image Analysis Methods
+    public void AnalyzeUploadedImage(string base64ImageData)
+    {
+        LogMessage("Analyzing uploaded image...");
+        
+        if (!isConnectionActive)
+        {
+            LogError("Cannot analyze image - not connected to realtime service");
+            return;
+        }
+        
+        if (string.IsNullOrEmpty(base64ImageData))
+        {
+            LogError("Cannot analyze image - no image data provided");
+            return;
+        }
+        
+        // Create conversation item with image analysis request
+        var conversationItem = new JObject
+        {
+            ["type"] = "conversation.item.create",
+            ["item"] = new JObject
+            {
+                ["type"] = "message",
+                ["role"] = "user",
+                ["content"] = new JArray
+                {
+                    new JObject
+                    {
+                        ["type"] = "text",
+                        ["text"] = "Please describe what you see in this image in detail."
+                    },
+                    new JObject
+                    {
+                        ["type"] = "input_image", 
+                        ["image"] = new JObject
+                        {
+                            ["data"] = base64ImageData,
+                            ["format"] = "jpeg"
+                        }
+                    }
+                }
+            }
+        };
+        
+        // Send the conversation item
+        if (dataChannel?.ReadyState == RTCDataChannelState.Open)
+        {
+            dataChannel.Send(Encoding.UTF8.GetBytes(conversationItem.ToString(Formatting.None)));
+            LogMessage("Sent image for analysis");
+            
+            // Trigger response generation
+            var responseCreate = new JObject
+            {
+                ["type"] = "response.create"
+            };
+            
+            dataChannel.Send(Encoding.UTF8.GetBytes(responseCreate.ToString(Formatting.None)));
+            LogMessage("Requested AI response for image analysis");
+        }
+        else
+        {
+            LogError("Data channel not available for image analysis");
+        }
+    }
+    
     private void OnDestroy()
     {
         CleanupConnection();
