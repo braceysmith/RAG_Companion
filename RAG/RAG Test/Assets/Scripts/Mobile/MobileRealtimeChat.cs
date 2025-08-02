@@ -1175,13 +1175,39 @@ public class MobileRealtimeChat : MonoBehaviour
     
     private string ExtractTextFromMessage(JObject message)
     {
+        LogMessage($"🔍 Extracting text from message: {message.ToString(Formatting.None).Substring(0, Math.Min(500, message.ToString(Formatting.None).Length))}...");
+        
         // Extract text content from various message types
         var transcript = message["part"]?["transcript"]?.ToString();
-        if (!string.IsNullOrEmpty(transcript)) return transcript;
+        if (!string.IsNullOrEmpty(transcript)) 
+        {
+            LogMessage($"✅ Found transcript: {transcript}");
+            return transcript;
+        }
         
         var content = message["part"]?["content"]?.ToString();
-        if (!string.IsNullOrEmpty(content)) return content;
+        if (!string.IsNullOrEmpty(content)) 
+        {
+            LogMessage($"✅ Found content: {content}");
+            return content;
+        }
         
+        // Try other possible paths
+        var text = message["text"]?.ToString();
+        if (!string.IsNullOrEmpty(text)) 
+        {
+            LogMessage($"✅ Found text: {text}");
+            return text;
+        }
+        
+        var delta = message["delta"]?.ToString();
+        if (!string.IsNullOrEmpty(delta)) 
+        {
+            LogMessage($"✅ Found delta: {delta}");
+            return delta;
+        }
+        
+        LogMessage("❌ No text found in message");
         return "";
     }
     

@@ -3,6 +3,7 @@ using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UI;
+using UnityEngine.Networking;
 using TMPro;
 
 public class MobileCompanionUI : MonoBehaviour
@@ -1200,16 +1201,14 @@ public class MobileCompanionUI : MonoBehaviour
     // Image Upload Handling
     private void OnImageUploadButtonClicked()
     {
-        LogMessage("Image upload button clicked");
+        LogMessage("🖼️ Image upload button clicked");
         
         try
         {
-            if (currentState != ConversationState.Idle)
-            {
-                LogMessage("Cannot upload image while conversation is active");
-                ShowError("Please wait for the current conversation to finish before uploading an image.");
-                return;
-            }
+            LogMessage($"🔍 Image upload requested - Current state: {currentState}");
+            
+            // For now, allow image upload from any state for testing
+            LogMessage("⚠️ Bypassing state check for image upload testing");
             
             StartCoroutine(PickAndUploadImage());
         }
@@ -1277,41 +1276,133 @@ public class MobileCompanionUI : MonoBehaviour
     
     private IEnumerator LoadDemoImageForTesting()
     {
-        LogMessage("Loading demo image for testing...");
+        LogMessage("Creating test pattern for AI analysis...");
         
-        // Create a simple colored texture for demo
-        Texture2D demoTexture = new Texture2D(256, 256);
-        Color[] colors = new Color[256 * 256];
+        // Create a simple recognizable checkerboard pattern
+        Texture2D demoTexture = new Texture2D(128, 128);
+        Color[] colors = new Color[128 * 128];
         
-        // Create a simple gradient pattern
-        for (int y = 0; y < 256; y++)
+        // Create checkerboard pattern with clear description
+        for (int y = 0; y < 128; y++)
         {
-            for (int x = 0; x < 256; x++)
+            for (int x = 0; x < 128; x++)
             {
-                float r = (float)x / 255f;
-                float g = (float)y / 255f;
-                float b = 0.5f;
-                colors[y * 256 + x] = new Color(r, g, b, 1.0f);
+                bool isBlack = ((x / 16) + (y / 16)) % 2 == 0;
+                colors[y * 128 + x] = isBlack ? Color.black : Color.white;
             }
         }
         
         demoTexture.SetPixels(colors);
         demoTexture.Apply();
         
+        // Wait a frame to ensure texture is ready
+        yield return null;
+        
         // Convert to base64 for analysis
-        byte[] imageBytes = demoTexture.EncodeToPNG();
-        string base64Image = System.Convert.ToBase64String(imageBytes);
-        
-        // Add to chat and analyze
-        AddImageMessage(demoTexture, "Demo image for testing AI vision", true);
-        
-        if (realtimeChat != null)
+        byte[] imageBytes = null;
+        try
         {
-            realtimeChat.AnalyzeUploadedImage(base64Image);
+            imageBytes = demoTexture.EncodeToPNG();
+        }
+        catch (System.Exception ex)
+        {
+            LogError($"Failed to encode texture to PNG: {ex.Message}");
+            yield break;
         }
         
-        LogMessage("Demo image loaded and sent for analysis");
+        string base64Image = System.Convert.ToBase64String(imageBytes);
+        
+        LogMessage($"✅ Checkerboard pattern created: {imageBytes.Length} bytes, base64 length: {base64Image.Length}");
+        
+        // Add to chat first
+        AddImageMessage(demoTexture, "Black and white checkerboard test pattern", true);
+        
+        // Wait another frame before sending for analysis
         yield return null;
+        
+        // Send image to RAG server for analysis (not directly to realtime chat)
+        if (realtimeChat != null)
+        {
+            StartCoroutine(SendImageToRAGServer(base64Image));
+        }
+        else
+        {
+            LogError("RAG server not available for image analysis");
+        }
+        
+        LogMessage("🚀 Checkerboard pattern sent for AI analysis");
+    }
+    
+    private IEnumerator SendImageToRAGServer(string base64Image)
+    {
+        LogMessage("📡 Sending image to RAG server for analysis...");
+        
+        // Get RAG API URL from the realtime chat component using reflection
+        var ragApiUrlField = realtimeChat.GetType().GetField("ragApiUrl", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+        var userIdField = realtimeChat.GetType().GetField("userId", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+        
+        string ragApiUrl = ragApiUrlField?.GetValue(realtimeChat)?.ToString() ?? "";
+        string userId = userIdField?.GetValue(realtimeChat)?.ToString() ?? "mobile-user";
+        
+        if (string.IsNullOrEmpty(ragApiUrl))
+        {
+            LogError("RAG API URL not configured");
+            yield break;
+        }
+        
+        var requestBody = new 
+        {
+            image_data = base64Image,
+            question = "Please describe what you see in this image in detail.",
+            user_id = userId
+        };
+        
+        string jsonBody = JsonUtility.ToJson(requestBody);
+        
+        using (UnityWebRequest request = new UnityWebRequest($"{ragApiUrl}/analyze_image", "POST"))
+        {
+            byte[] bodyRaw = System.Text.Encoding.UTF8.GetBytes(jsonBody);
+            request.uploadHandler = new UploadHandlerRaw(bodyRaw);
+            request.downloadHandler = new DownloadHandlerBuffer();
+            request.SetRequestHeader("Content-Type", "application/json");
+            
+            yield return request.SendWebRequest();
+            
+            if (request.result == UnityWebRequest.Result.Success)
+            {
+                LogMessage("✅ RAG server processed image successfully");
+                
+                var response = JsonUtility.FromJson<ImageAnalysisResponse>(request.downloadHandler.text);
+                
+                if (!string.IsNullOrEmpty(response.description))
+                {
+                    // Send the analysis result through realtime chat for audio response
+                    string analysisPrompt = $"The user just uploaded an image. Here's what I can see in it: {response.description}. Please respond naturally as if you're looking at the image they shared.";
+                    
+                    if (realtimeChat != null)
+                    {
+                        realtimeChat.SendTextMessage(analysisPrompt);
+                    }
+                }
+                else
+                {
+                    LogError("No description received from RAG server");
+                }
+            }
+            else
+            {
+                LogError($"RAG server image analysis failed: {request.error}");
+                ShowError($"Image analysis failed: {request.error}");
+            }
+        }
+    }
+    
+    [System.Serializable]
+    private class ImageAnalysisResponse
+    {
+        public bool success;
+        public string description;
+        public string error;
     }
     
     private IEnumerator ProcessSelectedImage(string imagePath)
