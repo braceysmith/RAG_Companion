@@ -1150,17 +1150,18 @@ public class MobileRealtimeChat : MonoBehaviour
         var text = ExtractTextFromMessage(message);
         if (!string.IsNullOrEmpty(text))
         {
-            LogMessage($"Text response (may differ from audio): {text.Substring(0, Math.Min(50, text.Length))}...");
+            LogMessage($"Text response: {text.Substring(0, Math.Min(100, text.Length))}...");
             OnAIResponseReceived?.Invoke(text);
             
-            // Don't store text response - wait for audio transcript instead
-            // The audio transcript (what was actually spoken) will be stored in HandleAudioTranscriptDone
+            // Store the text response and display it immediately
+            // For image analysis and other text-based responses, this might be the only response we get
+            StoreAIResponse(text);
             
-            // Update UI - switch from processing to responding
+            // Update UI with the text response
             if (companionUI != null)
             {
                 companionUI.ShowProcessingIndicator(false);
-                // Don't add text message here - wait for audio transcript
+                companionUI.AddMessage(text, "assistant");
                 
                 // If we weren't already responding, start now
                 if (!isAIResponding)
@@ -1949,7 +1950,7 @@ public class MobileRealtimeChat : MonoBehaviour
         if (dataChannel?.ReadyState == RTCDataChannelState.Open)
         {
             dataChannel.Send(Encoding.UTF8.GetBytes(functionOutput.ToString(Formatting.None)));
-            LogMessage($"Sent function call result for {callId}");
+            LogMessage($"✅ Sent function call result for {callId}: {result.Substring(0, Math.Min(100, result.Length))}...");
         }
         
         // Trigger response generation
@@ -1961,6 +1962,7 @@ public class MobileRealtimeChat : MonoBehaviour
         if (dataChannel?.ReadyState == RTCDataChannelState.Open)
         {
             dataChannel.Send(Encoding.UTF8.GetBytes(responseCreate.ToString(Formatting.None)));
+            LogMessage($"🚀 Requested AI response after tool result for {callId}");
         }
     }
     
@@ -2594,11 +2596,13 @@ public class MobileRealtimeChat : MonoBehaviour
             }
         };
         
+        LogMessage($"🖼️ Sending image analysis request: {conversationItem.ToString(Formatting.None).Substring(0, Math.Min(300, conversationItem.ToString(Formatting.None).Length))}...");
+        
         // Send the conversation item
         if (dataChannel?.ReadyState == RTCDataChannelState.Open)
         {
             dataChannel.Send(Encoding.UTF8.GetBytes(conversationItem.ToString(Formatting.None)));
-            LogMessage("Sent image for analysis");
+            LogMessage("✅ Sent image conversation item to OpenAI");
             
             // Trigger response generation
             var responseCreate = new JObject
@@ -2607,11 +2611,11 @@ public class MobileRealtimeChat : MonoBehaviour
             };
             
             dataChannel.Send(Encoding.UTF8.GetBytes(responseCreate.ToString(Formatting.None)));
-            LogMessage("Requested AI response for image analysis");
+            LogMessage("🚀 Requested AI response for image analysis - waiting for response...");
         }
         else
         {
-            LogError("Data channel not available for image analysis");
+            LogError("❌ Data channel not available for image analysis");
         }
     }
     
