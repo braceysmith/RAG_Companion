@@ -1231,9 +1231,9 @@ public class MobileCompanionUI : MonoBehaviour
         // iOS image picker
         yield return StartCoroutine(PickImageIOS());
         #else
-        // Editor/Desktop fallback - load test image or show message
-        LogMessage("Image picker not available in editor - would open native picker on mobile");
-        ShowError("Image picking only available on mobile devices. In a real deployment, this would open your device's photo gallery.");
+        // Editor/Desktop fallback - use demo image for testing
+        LogMessage("Image picker not available in editor - using demo image for testing");
+        yield return StartCoroutine(LoadDemoImageForTesting());
         #endif
         
         yield return null;
@@ -1274,6 +1274,45 @@ public class MobileCompanionUI : MonoBehaviour
         yield return null;
     }
     #endif
+    
+    private IEnumerator LoadDemoImageForTesting()
+    {
+        LogMessage("Loading demo image for testing...");
+        
+        // Create a simple colored texture for demo
+        Texture2D demoTexture = new Texture2D(256, 256);
+        Color[] colors = new Color[256 * 256];
+        
+        // Create a simple gradient pattern
+        for (int y = 0; y < 256; y++)
+        {
+            for (int x = 0; x < 256; x++)
+            {
+                float r = (float)x / 255f;
+                float g = (float)y / 255f;
+                float b = 0.5f;
+                colors[y * 256 + x] = new Color(r, g, b, 1.0f);
+            }
+        }
+        
+        demoTexture.SetPixels(colors);
+        demoTexture.Apply();
+        
+        // Convert to base64 for analysis
+        byte[] imageBytes = demoTexture.EncodeToPNG();
+        string base64Image = System.Convert.ToBase64String(imageBytes);
+        
+        // Add to chat and analyze
+        AddImageMessage(demoTexture, "Demo image for testing AI vision", true);
+        
+        if (realtimeChat != null)
+        {
+            realtimeChat.AnalyzeUploadedImage(base64Image);
+        }
+        
+        LogMessage("Demo image loaded and sent for analysis");
+        yield return null;
+    }
     
     private IEnumerator ProcessSelectedImage(string imagePath)
     {

@@ -2582,17 +2582,13 @@ public class MobileRealtimeChat : MonoBehaviour
                 {
                     new JObject
                     {
-                        ["type"] = "text",
+                        ["type"] = "input_text",
                         ["text"] = "Please describe what you see in this image in detail."
                     },
                     new JObject
                     {
                         ["type"] = "input_image", 
-                        ["image"] = new JObject
-                        {
-                            ["data"] = base64ImageData,
-                            ["format"] = "jpeg"
-                        }
+                        ["image"] = $"data:image/png;base64,{base64ImageData}"
                     }
                 }
             }
