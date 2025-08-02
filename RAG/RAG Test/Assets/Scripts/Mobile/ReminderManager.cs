@@ -6,6 +6,14 @@ using UnityEngine.Networking;
 using TMPro;
 using Newtonsoft.Json;
 
+#if UNITY_ANDROID && !UNITY_EDITOR && MOBILE_NOTIFICATIONS
+using Unity.Notifications.Android;
+#endif
+
+#if UNITY_IOS && !UNITY_EDITOR && MOBILE_NOTIFICATIONS
+using Unity.Notifications.iOS;
+#endif
+
 [System.Serializable]
 public class ReminderData
 {
@@ -321,23 +329,23 @@ public class ReminderManager : MonoBehaviour
     
     private void InitializeMobileNotifications()
     {
-#if UNITY_ANDROID && !UNITY_EDITOR
+#if UNITY_ANDROID && !UNITY_EDITOR && MOBILE_NOTIFICATIONS
         // Android notification setup
-        var channel = new Unity.Notifications.Android.AndroidNotificationChannel()
+        var channel = new AndroidNotificationChannel()
         {
             Id = "reminder_channel",
             Name = "AI Reminders",
-            Importance = Unity.Notifications.Android.Importance.High,
+            Importance = Importance.High,
             Description = "Notifications for AI reminders",
         };
-        Unity.Notifications.Android.AndroidNotificationCenter.RegisterNotificationChannel(channel);
+        AndroidNotificationCenter.RegisterNotificationChannel(channel);
         
-#elif UNITY_IOS && !UNITY_EDITOR
+#elif UNITY_IOS && !UNITY_EDITOR && MOBILE_NOTIFICATIONS
         // iOS notification setup
-        Unity.Notifications.iOS.iOSNotificationCenter.RequestAuthorizationAsync(
-            Unity.Notifications.iOS.AuthorizationOption.Alert |
-            Unity.Notifications.iOS.AuthorizationOption.Badge |
-            Unity.Notifications.iOS.AuthorizationOption.Sound
+        iOSNotificationCenter.RequestAuthorizationAsync(
+            AuthorizationOption.Alert |
+            AuthorizationOption.Badge |
+            AuthorizationOption.Sound
         );
 #endif
         
@@ -346,33 +354,33 @@ public class ReminderManager : MonoBehaviour
     
     private void SendMobileNotification(ReminderData reminder)
     {
-#if UNITY_ANDROID && !UNITY_EDITOR
-        var notification = new Unity.Notifications.Android.AndroidNotification();
+#if UNITY_ANDROID && !UNITY_EDITOR && MOBILE_NOTIFICATIONS
+        var notification = new AndroidNotification();
         notification.Title = "AI Reminder";
         notification.Text = reminder.content;
         notification.SmallIcon = "icon_small";
         notification.LargeIcon = "icon_large";
         notification.FireTime = System.DateTime.Now;
         
-        Unity.Notifications.Android.AndroidNotificationCenter.SendNotification(notification, "reminder_channel");
+        AndroidNotificationCenter.SendNotification(notification, "reminder_channel");
         
-#elif UNITY_IOS && !UNITY_EDITOR
-        var notification = new Unity.Notifications.iOS.iOSNotification()
+#elif UNITY_IOS && !UNITY_EDITOR && MOBILE_NOTIFICATIONS
+        var notification = new iOSNotification()
         {
             Title = "AI Reminder",
             Body = reminder.content,
             ShowInForeground = false,
-            ForegroundPresentationOption = Unity.Notifications.iOS.PresentationOption.Alert | Unity.Notifications.iOS.PresentationOption.Sound,
+            ForegroundPresentationOption = PresentationOption.Alert | PresentationOption.Sound,
             CategoryIdentifier = "reminder_category",
             ThreadIdentifier = "reminder_thread",
-            Trigger = new Unity.Notifications.iOS.iOSNotificationTimeIntervalTrigger()
+            Trigger = new iOSNotificationTimeIntervalTrigger()
             {
                 TimeInterval = new System.TimeSpan(0, 0, 1),
                 Repeats = false
             }
         };
         
-        Unity.Notifications.iOS.iOSNotificationCenter.ScheduleNotification(notification);
+        iOSNotificationCenter.ScheduleNotification(notification);
 #endif
         
         Debug.Log($"📱 Sent mobile notification: {reminder.content}");
