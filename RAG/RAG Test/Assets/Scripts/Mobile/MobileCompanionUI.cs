@@ -332,6 +332,132 @@ public class MobileCompanionUI : MonoBehaviour
         }
     }
     
+    public void AddImageMessage(Texture2D image, string caption, bool isUserMessage = false, bool animate = true)
+    {
+        if (chatContainer == null || messagePrefab == null)
+        {
+            LogError("UI components not configured");
+            return;
+        }
+        
+        try
+        {
+            // Create message object
+            GameObject messageObj = Instantiate(messagePrefab, chatContainer);
+            
+            // Configure as image message
+            ConfigureImageMessageObject(messageObj, image, caption, isUserMessage ? "user" : "assistant");
+            
+            // Add to list
+            messageObjects.Add(messageObj);
+            
+            // Animate if requested
+            if (animate)
+            {
+                AnimateMessageAppearance(messageObj);
+            }
+            
+            // Cleanup old messages
+            CleanupOldMessages();
+            
+            // Auto-scroll to bottom
+            ScrollToBottom();
+            
+            // Haptic feedback
+            if (enableHapticFeedback)
+            {
+                TriggerHapticFeedback();
+            }
+            
+            LogMessage($"Image message added: {(isUserMessage ? "user" : "assistant")} - {caption}");
+        }
+        catch (Exception ex)
+        {
+            LogError($"Failed to add image message: {ex.Message}");
+        }
+    }
+    
+    private void ConfigureImageMessageObject(GameObject messageObj, Texture2D image, string caption, string sender)
+    {
+        // Find or create image component
+        Image imageComponent = messageObj.GetComponentInChildren<Image>();
+        if (imageComponent == null)
+        {
+            // Create image GameObject as child
+            GameObject imageChild = new GameObject("ImageDisplay");
+            imageChild.transform.SetParent(messageObj.transform, false);
+            imageComponent = imageChild.AddComponent<Image>();
+            
+            // Configure image layout
+            RectTransform imageRect = imageChild.GetComponent<RectTransform>();
+            imageRect.anchorMin = new Vector2(0, 0.3f);
+            imageRect.anchorMax = new Vector2(1, 1);
+            imageRect.offsetMin = new Vector2(10, 0);
+            imageRect.offsetMax = new Vector2(-10, -5);
+        }
+        
+        // Set the image texture
+        if (image != null)
+        {
+            Sprite imageSprite = Sprite.Create(image, new Rect(0, 0, image.width, image.height), new Vector2(0.5f, 0.5f));
+            imageComponent.sprite = imageSprite;
+            imageComponent.preserveAspect = true;
+        }
+        
+        // Configure caption text
+        TextMeshProUGUI messageText = messageObj.GetComponentInChildren<TextMeshProUGUI>();
+        if (messageText != null)
+        {
+            messageText.text = caption;
+            
+            // Move text to bottom of message
+            RectTransform textRect = messageText.GetComponent<RectTransform>();
+            textRect.anchorMin = new Vector2(0, 0);
+            textRect.anchorMax = new Vector2(1, 0.3f);
+            textRect.offsetMin = new Vector2(10, 5);
+            textRect.offsetMax = new Vector2(-10, 0);
+        }
+        
+        // Configure message appearance based on sender
+        Image backgroundImage = messageObj.GetComponent<Image>();
+        if (backgroundImage != null)
+        {
+            switch (sender.ToLower())
+            {
+                case "user":
+                    backgroundImage.color = userMessageColor;
+                    break;
+                case "assistant":
+                    backgroundImage.color = assistantMessageColor;
+                    break;
+                default:
+                    backgroundImage.color = assistantMessageColor;
+                    break;
+            }
+        }
+        
+        // Configure message alignment
+        RectTransform rectTransform = messageObj.GetComponent<RectTransform>();
+        if (rectTransform != null)
+        {
+            if (sender.ToLower() == "user")
+            {
+                // Align user messages to the right
+                rectTransform.anchorMin = new Vector2(0.3f, 0);
+                rectTransform.anchorMax = new Vector2(1f, 1);
+            }
+            else
+            {
+                // Align assistant messages to the left
+                rectTransform.anchorMin = new Vector2(0f, 0);
+                rectTransform.anchorMax = new Vector2(0.7f, 1);
+            }
+            
+            // Make image messages taller
+            rectTransform.sizeDelta = new Vector2(rectTransform.sizeDelta.x, 200);
+        }
+    }
+    
     private void ConfigureMessageObject(GameObject messageObj, string message, string sender)
     {
         // Configure message bubble

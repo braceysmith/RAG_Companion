@@ -386,6 +386,97 @@ async def create_realtime_session(request: RealtimeSessionRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Realtime session creation failed: {str(e)}")
 
+@app.post("/generate_image")
+async def generate_image(request: dict):
+    """Generate an image using DALL-E 3"""
+    try:
+        prompt = request.get("prompt", "")
+        size = request.get("size", "1024x1024")
+        user_id = request.get("user_id", "")
+        
+        if not prompt:
+            raise HTTPException(status_code=400, detail="Prompt is required")
+        
+        # Call DALL-E 3 API
+        response = client.images.generate(
+            model="dall-e-3",
+            prompt=prompt,
+            size=size,
+            quality="standard",
+            n=1,
+        )
+        
+        image_url = response.data[0].url
+        
+        # Log the image generation
+        print(f"🎨 Generated image for user {user_id}: {prompt}")
+        
+        return {
+            "success": True,
+            "image_url": image_url,
+            "prompt": prompt,
+            "size": size
+        }
+        
+    except Exception as e:
+        print(f"❌ Image generation error: {str(e)}")
+        return {
+            "success": False,
+            "error": str(e)
+        }
+
+@app.post("/analyze_image")
+async def analyze_image(request: dict):
+    """Analyze an image using GPT-4 Vision"""
+    try:
+        image_data = request.get("image_data", "")
+        question = request.get("question", "Describe what you see in this image")
+        user_id = request.get("user_id", "")
+        
+        if not image_data:
+            raise HTTPException(status_code=400, detail="Image data is required")
+        
+        # Call GPT-4 Vision API
+        response = client.chat.completions.create(
+            model="gpt-4o",
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": question
+                        },
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:image/jpeg;base64,{image_data}"
+                            }
+                        }
+                    ]
+                }
+            ],
+            max_tokens=500
+        )
+        
+        description = response.choices[0].message.content
+        
+        # Log the image analysis
+        print(f"🔍 Analyzed image for user {user_id}: {question}")
+        
+        return {
+            "success": True,
+            "description": description,
+            "question": question
+        }
+        
+    except Exception as e:
+        print(f"❌ Image analysis error: {str(e)}")
+        return {
+            "success": False,
+            "error": str(e)
+        }
+
 def extract_personal_info(message: str) -> dict:
     """Extract personal information from user messages"""
     personal_info = {}
@@ -941,49 +1032,11 @@ async def check_and_use_tools(query: str, user_profile: dict) -> Optional[dict]:
     """Check if query needs tool usage and execute if needed"""
     query_lower = query.lower()
     
-    # Weather tool detection
-    weather_keywords = ["weather", "temperature", "forecast", "rain", "sunny", "cloudy", "hot", "cold"]
-    if any(keyword in query_lower for keyword in weather_keywords):
-        # Try to extract location from query or use user's stored location
-        location = extract_location_from_query(query) or user_profile.get("location", "")
-        
-        if location:
-            return await tool_manager.execute_tool("get_weather", location=location)
-        else:
-            return {
-                "success": False,
-                "message": "I'd love to check the weather for you! Which city or location would you like to know about?"
-            }
-    
-    # Easy to add more tool detections here:
+    # Future tool detections can be added here:
     # if "schedule" in query_lower or "calendar" in query_lower:
     #     return await tool_manager.execute_tool("get_calendar")
     
     return None
-
-def extract_location_from_query(query: str) -> str:
-    """Extract location from weather-related queries"""
-    query_lower = query.lower()
-    
-    # Simple location extraction patterns
-    location_patterns = [
-        "weather in ",
-        "weather for ",
-        "temperature in ",
-        "temperature for ",
-        "forecast for ",
-        "forecast in "
-    ]
-    
-    for pattern in location_patterns:
-        if pattern in query_lower:
-            start = query_lower.find(pattern) + len(pattern)
-            # Extract location (take words until punctuation or end)
-            location_part = query[start:].split('?')[0].split('.')[0].split('!')[0].strip()
-            if location_part:
-                return location_part
-    
-    return ""
 
 @app.post("/query")
 async def rag_query_sync(request: dict):

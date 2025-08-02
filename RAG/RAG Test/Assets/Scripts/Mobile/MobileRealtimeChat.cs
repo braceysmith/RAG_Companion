@@ -965,6 +965,14 @@ public class MobileRealtimeChat : MonoBehaviour
                     LogMessage("Content part completed");
                     break;
                     
+                case "response.function_call_arguments.delta":
+                    HandleFunctionCallArgumentsDelta(jo);
+                    break;
+                    
+                case "response.function_call_arguments.done":
+                    HandleFunctionCallArgumentsDone(jo);
+                    break;
+                    
                 case "session.created":
                 case "session.updated":
                     LogMessage("Session event received");
@@ -1730,6 +1738,232 @@ public class MobileRealtimeChat : MonoBehaviour
         }
     }
     
+    private void HandleFunctionCallArgumentsDelta(JObject message)
+    {
+        // Handle incremental function call arguments
+        LogMessage("Function call arguments delta received");
+    }
+    
+    private void HandleFunctionCallArgumentsDone(JObject message)
+    {
+        LogMessage("Function call arguments complete");
+        
+        // Extract function call details
+        var call_id = message["call_id"]?.ToString();
+        var name = message["name"]?.ToString();
+        var arguments = message["arguments"]?.ToString();
+        
+        LogMessage($"Function call: {name} with args: {arguments}");
+        
+        // Execute the function call
+        StartCoroutine(ExecuteFunctionCall(call_id, name, arguments));
+    }
+    
+    private IEnumerator ExecuteFunctionCall(string callId, string functionName, string argumentsJson)
+    {
+        switch (functionName)
+        {
+            case "generate_image":
+                yield return StartCoroutine(HandleImageGeneration(callId, argumentsJson));
+                break;
+                
+            case "analyze_image":
+                yield return StartCoroutine(HandleImageAnalysis(callId, argumentsJson));
+                break;
+                
+            default:
+                LogError($"Unknown function: {functionName}");
+                SendFunctionCallResult(callId, $"Error: Unknown function '{functionName}'");
+                break;
+        }
+    }
+    
+    private IEnumerator HandleImageGeneration(string callId, string argumentsJson)
+    {
+        LogMessage($"Generating image with args: {argumentsJson}");
+        
+        // Parse arguments
+        var args = JsonConvert.DeserializeObject<Dictionary<string, object>>(argumentsJson);
+        var prompt = args.ContainsKey("prompt") ? args["prompt"].ToString() : "";
+        var size = args.ContainsKey("size") ? args["size"].ToString() : "1024x1024";
+        
+        if (string.IsNullOrEmpty(prompt))
+        {
+            SendFunctionCallResult(callId, "Error: No prompt provided");
+            yield break;
+        }
+        
+        if (!enableRAGContext || string.IsNullOrEmpty(ragApiUrl))
+        {
+            SendFunctionCallResult(callId, "Error: RAG server not configured for image generation");
+            yield break;
+        }
+        
+        // Call RAG server's image generation endpoint
+        var requestBody = new JObject
+        {
+            ["prompt"] = prompt,
+            ["size"] = size,
+            ["user_id"] = userId
+        };
+        
+        using (UnityWebRequest request = new UnityWebRequest($"{ragApiUrl}/generate_image", "POST"))
+        {
+            byte[] bodyRaw = Encoding.UTF8.GetBytes(requestBody.ToString());
+            request.uploadHandler = new UploadHandlerRaw(bodyRaw);
+            request.downloadHandler = new DownloadHandlerBuffer();
+            request.SetRequestHeader("Content-Type", "application/json");
+            
+            yield return request.SendWebRequest();
+            
+            if (request.result == UnityWebRequest.Result.Success)
+            {
+                var response = JsonConvert.DeserializeObject<Dictionary<string, object>>(request.downloadHandler.text);
+                
+                if (response.ContainsKey("image_url"))
+                {
+                    var imageUrl = response["image_url"].ToString();
+                    LogMessage($"Image generated: {imageUrl}");
+                    
+                    // Download and display the image
+                    yield return StartCoroutine(DownloadAndDisplayImage(imageUrl, prompt));
+                    
+                    SendFunctionCallResult(callId, $"Image generated successfully: {prompt}");
+                }
+                else
+                {
+                    var error = response.ContainsKey("error") ? response["error"].ToString() : "Unknown error";
+                    LogError($"Image generation failed: {error}");
+                    SendFunctionCallResult(callId, $"Error generating image: {error}");
+                }
+            }
+            else
+            {
+                LogError($"Image generation request failed: {request.error}");
+                SendFunctionCallResult(callId, $"Error generating image: {request.error}");
+            }
+        }
+    }
+    
+    private IEnumerator HandleImageAnalysis(string callId, string argumentsJson)
+    {
+        LogMessage($"Analyzing image with args: {argumentsJson}");
+        
+        // Parse arguments
+        var args = JsonConvert.DeserializeObject<Dictionary<string, object>>(argumentsJson);
+        var imageData = args.ContainsKey("image_data") ? args["image_data"].ToString() : "";
+        var question = args.ContainsKey("question") ? args["question"].ToString() : "Describe what you see in this image";
+        
+        if (string.IsNullOrEmpty(imageData))
+        {
+            SendFunctionCallResult(callId, "Error: No image data provided");
+            yield break;
+        }
+        
+        if (!enableRAGContext || string.IsNullOrEmpty(ragApiUrl))
+        {
+            SendFunctionCallResult(callId, "Error: RAG server not configured for image analysis");
+            yield break;
+        }
+        
+        // Call RAG server's image analysis endpoint
+        var requestBody = new JObject
+        {
+            ["image_data"] = imageData,
+            ["question"] = question,
+            ["user_id"] = userId
+        };
+        
+        using (UnityWebRequest request = new UnityWebRequest($"{ragApiUrl}/analyze_image", "POST"))
+        {
+            byte[] bodyRaw = Encoding.UTF8.GetBytes(requestBody.ToString());
+            request.uploadHandler = new UploadHandlerRaw(bodyRaw);
+            request.downloadHandler = new DownloadHandlerBuffer();
+            request.SetRequestHeader("Content-Type", "application/json");
+            
+            yield return request.SendWebRequest();
+            
+            if (request.result == UnityWebRequest.Result.Success)
+            {
+                var response = JsonConvert.DeserializeObject<Dictionary<string, object>>(request.downloadHandler.text);
+                
+                if (response.ContainsKey("description"))
+                {
+                    var description = response["description"].ToString();
+                    LogMessage($"Image analysis result: {description}");
+                    SendFunctionCallResult(callId, description);
+                }
+                else
+                {
+                    var error = response.ContainsKey("error") ? response["error"].ToString() : "Unknown error";
+                    LogError($"Image analysis failed: {error}");
+                    SendFunctionCallResult(callId, $"Error analyzing image: {error}");
+                }
+            }
+            else
+            {
+                LogError($"Image analysis request failed: {request.error}");
+                SendFunctionCallResult(callId, $"Error analyzing image: {request.error}");
+            }
+        }
+    }
+    
+    private IEnumerator DownloadAndDisplayImage(string imageUrl, string prompt)
+    {
+        using (UnityWebRequest request = UnityWebRequestTexture.GetTexture(imageUrl))
+        {
+            yield return request.SendWebRequest();
+            
+            if (request.result == UnityWebRequest.Result.Success) 
+            {
+                Texture2D texture = ((DownloadHandlerTexture)request.downloadHandler).texture;
+                
+                // Display image in UI
+                if (companionUI != null)
+                {
+                    companionUI.AddImageMessage(texture, prompt, false); // false = AI message
+                }
+                
+                LogMessage($"Image displayed in chat: {prompt}");
+            }
+            else
+            {
+                LogError($"Failed to download image: {request.error}");
+            }
+        }
+    }
+    
+    private void SendFunctionCallResult(string callId, string result)
+    {
+        var functionOutput = new JObject
+        {
+            ["type"] = "conversation.item.create",
+            ["item"] = new JObject
+            {
+                ["type"] = "function_call_output",
+                ["call_id"] = callId,
+                ["output"] = result
+            }
+        };
+        
+        if (dataChannel?.ReadyState == RTCDataChannelState.Open)
+        {
+            dataChannel.Send(Encoding.UTF8.GetBytes(functionOutput.ToString(Formatting.None)));
+            LogMessage($"Sent function call result for {callId}");
+        }
+        
+        // Trigger response generation
+        var responseCreate = new JObject
+        {
+            ["type"] = "response.create"
+        };
+        
+        if (dataChannel?.ReadyState == RTCDataChannelState.Open)
+        {
+            dataChannel.Send(Encoding.UTF8.GetBytes(responseCreate.ToString(Formatting.None)));
+        }
+    }
+    
     // RAG Memory Storage Methods
     private void StoreUserMessage(string message)
     {
@@ -1921,7 +2155,61 @@ public class MobileRealtimeChat : MonoBehaviour
                     ["prefix_padding_ms"] = 300,
                     ["silence_duration_ms"] = 2000
                 },
-                ["tool_choice"] = "none",
+                ["tool_choice"] = "auto",
+                ["tools"] = new JArray
+                {
+                    new JObject
+                    {
+                        ["type"] = "function",
+                        ["name"] = "generate_image",
+                        ["description"] = "Generate an image using DALL-E 3 based on a text prompt",
+                        ["parameters"] = new JObject
+                        {
+                            ["type"] = "object",
+                            ["properties"] = new JObject
+                            {
+                                ["prompt"] = new JObject
+                                {
+                                    ["type"] = "string",
+                                    ["description"] = "The text prompt describing the image to generate"
+                                },
+                                ["size"] = new JObject
+                                {
+                                    ["type"] = "string",
+                                    ["description"] = "The size of the image",
+                                    ["enum"] = new JArray { "1024x1024", "1792x1024", "1024x1792" },
+                                    ["default"] = "1024x1024"
+                                }
+                            },
+                            ["required"] = new JArray { "prompt" }
+                        }
+                    },
+                    new JObject
+                    {
+                        ["type"] = "function", 
+                        ["name"] = "analyze_image",
+                        ["description"] = "Analyze and describe an image using GPT-4 Vision",
+                        ["parameters"] = new JObject
+                        {
+                            ["type"] = "object",
+                            ["properties"] = new JObject
+                            {
+                                ["image_data"] = new JObject
+                                {
+                                    ["type"] = "string",
+                                    ["description"] = "Base64 encoded image data"
+                                },
+                                ["question"] = new JObject
+                                {
+                                    ["type"] = "string", 
+                                    ["description"] = "Optional specific question about the image",
+                                    ["default"] = "Describe what you see in this image"
+                                }
+                            },
+                            ["required"] = new JArray { "image_data" }
+                        }
+                    }
+                },
                 ["temperature"] = 0.8,
                 ["max_response_output_tokens"] = 4096
             }
