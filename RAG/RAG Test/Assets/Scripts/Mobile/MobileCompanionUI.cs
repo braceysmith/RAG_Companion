@@ -1314,8 +1314,10 @@ public class MobileCompanionUI : MonoBehaviour
         
         LogMessage($"✅ Checkerboard pattern created: {imageBytes.Length} bytes, base64 length: {base64Image.Length}");
         
-        // Add to chat first
+        // Add to chat first  
+        LogMessage("📷 Adding image to chat UI...");
         AddImageMessage(demoTexture, "Black and white checkerboard test pattern", true);
+        LogMessage("✅ Image added to chat UI");
         
         // Wait another frame before sending for analysis
         yield return null;
@@ -1350,7 +1352,7 @@ public class MobileCompanionUI : MonoBehaviour
             yield break;
         }
         
-        var requestBody = new 
+        var requestBody = new ImageAnalysisRequest
         {
             image_data = base64Image,
             question = "Please describe what you see in this image in detail.",
@@ -1358,6 +1360,7 @@ public class MobileCompanionUI : MonoBehaviour
         };
         
         string jsonBody = JsonUtility.ToJson(requestBody);
+        LogMessage($"📦 Request JSON: {jsonBody.Substring(0, Math.Min(200, jsonBody.Length))}...");
         
         using (UnityWebRequest request = new UnityWebRequest($"{ragApiUrl}/analyze_image", "POST"))
         {
@@ -1371,22 +1374,34 @@ public class MobileCompanionUI : MonoBehaviour
             if (request.result == UnityWebRequest.Result.Success)
             {
                 LogMessage("✅ RAG server processed image successfully");
+                LogMessage($"🔍 RAG server response: {request.downloadHandler.text}");
                 
-                var response = JsonUtility.FromJson<ImageAnalysisResponse>(request.downloadHandler.text);
-                
-                if (!string.IsNullOrEmpty(response.description))
+                try
                 {
-                    // Send the analysis result through realtime chat for audio response
-                    string analysisPrompt = $"The user just uploaded an image. Here's what I can see in it: {response.description}. Please respond naturally as if you're looking at the image they shared.";
+                    var response = JsonUtility.FromJson<ImageAnalysisResponse>(request.downloadHandler.text);
                     
-                    if (realtimeChat != null)
+                    if (response != null && !string.IsNullOrEmpty(response.description))
                     {
-                        realtimeChat.SendTextMessage(analysisPrompt);
+                        LogMessage($"📝 Got description from RAG: {response.description.Substring(0, Math.Min(100, response.description.Length))}...");
+                        
+                        // Send the analysis result through realtime chat for audio response
+                        // Tell the AI to speak as if it can see the image
+                        string analysisPrompt = $"Speak as if you can see the image you are describing: {response.description}";
+                        
+                        if (realtimeChat != null)
+                        {
+                            realtimeChat.SendTextMessage(analysisPrompt);
+                        }
+                    }
+                    else
+                    {
+                        LogError($"No description received from RAG server. Response object: {response}, Description: '{response?.description}'");
                     }
                 }
-                else
+                catch (System.Exception ex)
                 {
-                    LogError("No description received from RAG server");
+                    LogError($"Failed to parse RAG response: {ex.Message}");
+                    LogMessage($"Raw response was: {request.downloadHandler.text}");
                 }
             }
             else
@@ -1395,6 +1410,14 @@ public class MobileCompanionUI : MonoBehaviour
                 ShowError($"Image analysis failed: {request.error}");
             }
         }
+    }
+    
+    [System.Serializable]
+    private class ImageAnalysisRequest
+    {
+        public string image_data;
+        public string question;
+        public string user_id;
     }
     
     [System.Serializable]
