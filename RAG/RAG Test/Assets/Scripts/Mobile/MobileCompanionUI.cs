@@ -13,6 +13,7 @@ public class MobileCompanionUI : MonoBehaviour
     [SerializeField] private TMP_InputField messageInput;
     [SerializeField] private Button sendButton;
     [SerializeField] private Button imageUploadButton;
+    [SerializeField] private Button cameraButton;
     [SerializeField] private ScrollRect chatScrollRect;
     [SerializeField] private GameObject messagePrefab;
     
@@ -148,10 +149,16 @@ public class MobileCompanionUI : MonoBehaviour
             voiceRecordButton.onClick.AddListener(OnVoiceButtonClicked);
         }
         
-        // Setup image upload button
+        // Setup image upload button (gallery)
         if (imageUploadButton != null)
         {
             imageUploadButton.onClick.AddListener(OnImageUploadButtonClicked);
+        }
+        
+        // Setup camera button
+        if (cameraButton != null)
+        {
+            cameraButton.onClick.AddListener(OnCameraButtonClicked);
         }
         
         // Setup error panel buttons
@@ -1201,11 +1208,13 @@ public class MobileCompanionUI : MonoBehaviour
     // Image Upload Handling
     private void OnImageUploadButtonClicked()
     {
-        LogMessage("🖼️ Image upload button clicked");
+        LogMessage("🖼️ GALLERY BUTTON CLICKED - Starting gallery functionality");
+        LogMessage($"🖼️ Gallery button handler called: OnImageUploadButtonClicked()");
         
         try
         {
             LogMessage($"🔍 Image upload requested - Current state: {currentState}");
+            LogMessage("🖼️ About to start PickAndUploadImage coroutine");
             
             // For now, allow image upload from any state for testing
             LogMessage("⚠️ Bypassing state check for image upload testing");
@@ -1219,57 +1228,393 @@ public class MobileCompanionUI : MonoBehaviour
         }
     }
     
-    private IEnumerator PickAndUploadImage()
+    private void OnCameraButtonClicked()
     {
-        LogMessage("Starting image picker...");
+        LogMessage("📸 CAMERA BUTTON CLICKED - Starting camera functionality");
+        LogMessage($"📸 Camera button handler called: OnCameraButtonClicked()");
         
-        #if UNITY_ANDROID && !UNITY_EDITOR
-        // Android image picker
-        yield return StartCoroutine(PickImageAndroid());
-        #elif UNITY_IOS && !UNITY_EDITOR
-        // iOS image picker
-        yield return StartCoroutine(PickImageIOS());
+        try
+        {
+            LogMessage($"🔍 Camera capture requested - Current state: {currentState}");
+            LogMessage("📸 About to start CapturePhotoWithCamera coroutine");
+            
+            // For now, allow camera capture from any state for testing
+            LogMessage("⚠️ Bypassing state check for camera capture testing");
+            
+            StartCoroutine(CapturePhotoWithCamera());
+        }
+        catch (System.Exception ex)
+        {
+            LogError($"Error in camera button handler: {ex.Message}");
+            ShowError($"Camera capture error: {ex.Message}");
+        }
+    }
+    
+    private IEnumerator CapturePhotoWithCamera()
+    {
+        LogMessage("📸 CapturePhotoWithCamera coroutine started");
+        LogMessage("📸 Starting camera photo capture...");
+        
+        #if !UNITY_EDITOR && (UNITY_ANDROID || UNITY_IOS)
+        LogMessage("📸 Mobile platform detected - calling TakePhotoWithCamera");
+        yield return StartCoroutine(TakePhotoWithCamera());
         #else
         // Editor/Desktop fallback - use demo image for testing
-        LogMessage("Image picker not available in editor - using demo image for testing");
+        LogMessage("📸 Editor/Desktop detected - Camera not available in editor, using demo image for testing");
+        yield return StartCoroutine(LoadDemoImageForTesting());
+        #endif
+        
+        LogMessage("📸 CapturePhotoWithCamera coroutine completed");
+        yield return null;
+    }
+    
+    private IEnumerator PickAndUploadImage()
+    {
+        LogMessage("🖼️ PickAndUploadImage coroutine started");
+        LogMessage("🖼️ Starting gallery image picker...");
+        
+        #if !UNITY_EDITOR && (UNITY_ANDROID || UNITY_IOS)
+        LogMessage("🖼️ Mobile platform detected - calling SelectImageFromGallery");
+        yield return StartCoroutine(SelectImageFromGallery());
+        #else
+        // Editor/Desktop fallback - use demo image for testing
+        LogMessage("🖼️ Editor/Desktop detected - Gallery picker not available in editor, using demo image for testing");
+        yield return StartCoroutine(LoadDemoImageForTesting());
+        #endif
+        
+        LogMessage("🖼️ PickAndUploadImage coroutine completed");
+        yield return null;
+    }
+    
+    private IEnumerator ShowImageSourceDialog()
+    {
+        LogMessage("📱 Showing image source selection...");
+        
+        // Use Unity Native Gallery to show source selection
+        #if !UNITY_EDITOR && (UNITY_ANDROID || UNITY_IOS)
+        
+        // Show native dialog asking user to choose camera or gallery
+        // For now, we'll use gallery as default - in future versions we can add
+        // a custom UI dialog with Camera and Gallery buttons
+        
+        // Default to gallery for this implementation
+        // Future enhancement: Add custom dialog with "Camera" and "Gallery" buttons
+        yield return StartCoroutine(SelectImageFromGallery());
+        
+        #else
+        LogMessage("Image picker not available in editor - using demo image");
         yield return StartCoroutine(LoadDemoImageForTesting());
         #endif
         
         yield return null;
     }
     
-    #if UNITY_ANDROID && !UNITY_EDITOR
-    private IEnumerator PickImageAndroid()
+    private IEnumerator SelectImageFromGallery()
     {
-        // Android implementation using Intent (requires native plugin in production)
-        // For demonstration, show how this would work
-        LogMessage("Android image picker would launch here");
+        LogMessage("🖼️ SelectImageFromGallery coroutine started");
+        LogMessage("📷 Opening gallery for image selection...");
         
-        // In production, you would:
-        // 1. Install Unity Native Gallery package from Asset Store
-        // 2. Or create custom Android plugin with Java code like:
-        // Intent intent = new Intent(Intent.ACTION_PICK, MediaStore.Images.Media.EXTERNAL_CONTENT_URI);
-        // UnityPlayer.currentActivity.startActivityForResult(intent, PICK_IMAGE_REQUEST);
+        // Check if media picker is busy
+        if (!NativeGallery.IsMediaPickerBusy())
+        {
+            LogMessage("🖼️ Media picker is available, proceeding with permission check");
+            // Check permission first
+            bool hasPermission = NativeGallery.CheckPermission(NativeGallery.PermissionType.Read, NativeGallery.MediaType.Image);
+            
+            if (!hasPermission)
+            {
+                // Request permission asynchronously
+                bool permissionRequested = false;
+                NativeGallery.Permission requestResult = NativeGallery.Permission.Denied;
+                
+                NativeGallery.RequestPermissionAsync((result) =>
+                {
+                    requestResult = result;
+                    permissionRequested = true;
+                }, NativeGallery.PermissionType.Read, NativeGallery.MediaType.Image);
+                
+                // Wait for permission request result
+                while (!permissionRequested)
+                {
+                    yield return new WaitForSeconds(0.1f);
+                }
+                
+                hasPermission = (requestResult == NativeGallery.Permission.Granted);
+            }
+            
+            if (hasPermission)
+            {
+                // Pick image from gallery
+                bool imageSelected = false;
+                string imagePath = null;
+                
+                LogMessage("🖼️ Calling NativeGallery.GetImageFromGallery...");
+                NativeGallery.GetImageFromGallery((path) =>
+                {
+                    LogMessage($"🖼️ Gallery callback triggered with path: {path}");
+                    imagePath = path;
+                    imageSelected = true;
+                    if (path != null)
+                    {
+                        LogMessage($"✅ Image selected successfully: {path}");
+                    }
+                    else
+                    {
+                        LogMessage("❌ Image selection cancelled or failed (path is null)");
+                    }
+                }, "Select Image", "image/*");
+                
+                // Wait for user selection
+                while (!imageSelected && !NativeGallery.IsMediaPickerBusy())
+                {
+                    yield return new WaitForSeconds(0.1f);
+                }
+                
+                // Process selected image
+                if (!string.IsNullOrEmpty(imagePath))
+                {
+                    yield return StartCoroutine(ProcessSelectedImage(imagePath));
+                }
+                else
+                {
+                    LogMessage("❌ No image selected");
+                }
+            }
+            else
+            {
+                LogError("Gallery permission denied");
+                ShowError("Gallery access permission is required to select images.");
+            }
+        }
+        else
+        {
+            LogError("Media picker is busy");
+            ShowError("Another media selection is in progress.");
+        }
         
-        ShowError("Image picking ready for Android deployment. Install Unity Native Gallery package for full functionality.");
+        yield return null;
+    }
+    
+    private IEnumerator ProcessSelectedImage(string imagePath)
+    {
+        LogMessage($"🖼️ ProcessSelectedImage coroutine started with path: {imagePath}");
+        LogMessage($"🖼️ Processing selected image: {imagePath}");
+        
+        // Load texture from file path
+        if (System.IO.File.Exists(imagePath))
+        {
+            byte[] imageData = System.IO.File.ReadAllBytes(imagePath);
+            Texture2D texture = new Texture2D(2, 2);
+            
+            if (texture.LoadImage(imageData))
+            {
+                LogMessage($"✅ Image loaded: {texture.width}x{texture.height}");
+                
+                // Add to chat UI
+                string fileName = System.IO.Path.GetFileName(imagePath);
+                AddImageMessage(texture, $"Selected image: {fileName}", true);
+                
+                // Convert to base64 and send for analysis
+                string base64Image = System.Convert.ToBase64String(imageData);
+                StartCoroutine(SendImageToRAGServer(base64Image));
+                
+                LogMessage("🚀 Image sent for AI analysis");
+            }
+            else
+            {
+                LogError("Failed to load image from file");
+                ShowError("Failed to process selected image.");
+            }
+        }
+        else
+        {
+            LogError($"Image file not found: {imagePath}");
+            ShowError("Selected image file not found.");
+        }
+        
+        yield return null;
+    }
+    
+    private IEnumerator TakePhotoWithCamera()
+    {
+        LogMessage("📸 Opening camera for photo capture...");
+        
+        // Check if device has camera
+        if (!NativeCamera.DeviceHasCamera())
+        {
+            LogError("Device does not have a camera");
+            ShowError("Your device does not have a camera available.");
+            yield break;
+        }
+        
+        // Check if camera is busy
+        if (NativeCamera.IsCameraBusy())
+        {
+            LogError("Camera is currently busy");
+            ShowError("Camera is currently in use by another application.");
+            yield break;
+        }
+        
+        // Take picture with Unity Native Camera
+        bool photoTaken = false;
+        string photoPath = null;
+        
+        NativeCamera.TakePicture((path) =>
+        {
+            photoPath = path;
+            photoTaken = true;
+            
+            if (path != null)
+            {
+                LogMessage($"✅ Photo captured successfully: {path}");
+            }
+            else
+            {
+                LogMessage("❌ Photo capture was cancelled or failed");
+            }
+        }, 1024); // Max size 1024px
+        
+        // Wait for photo capture to complete
+        while (!photoTaken)
+        {
+            yield return new WaitForSeconds(0.1f);
+        }
+        
+        // Process captured photo
+        if (!string.IsNullOrEmpty(photoPath))
+        {
+            yield return StartCoroutine(ProcessCapturedPhoto(photoPath));
+        }
+        else
+        {
+            LogMessage("No photo was captured");
+            ShowError("Photo capture was cancelled or failed.");
+        }
+        
+        yield return null;
+    }
+    
+    private IEnumerator ProcessCapturedPhoto(string photoPath)
+    {
+        LogMessage($"📷 Processing captured photo: {photoPath}");
+        
+        try
+        {
+            // Load the captured image using Unity Native Camera's helper method
+            Texture2D texture = NativeCamera.LoadImageAtPath(photoPath, 1024, false);
+            
+            if (texture != null)
+            {
+                LogMessage($"✅ Photo loaded successfully: {texture.width}x{texture.height}");
+                
+                // Add to chat UI
+                AddImageMessage(texture, "Captured photo", true);
+                
+                // Convert to base64 for analysis
+                byte[] imageBytes = texture.EncodeToPNG();
+                string base64Image = System.Convert.ToBase64String(imageBytes);
+                
+                // Send to RAG server for analysis
+                StartCoroutine(SendImageToRAGServer(base64Image));
+                
+                LogMessage("🚀 Captured photo sent for AI analysis");
+            }
+            else
+            {
+                LogError("Failed to load captured photo");
+                ShowError("Failed to process the captured photo.");
+            }
+        }
+        catch (System.Exception ex)
+        {
+            LogError($"Error processing captured photo: {ex.Message}");
+            ShowError($"Error processing photo: {ex.Message}");
+        }
+        
+        yield return null;
+    }
+    
+    #if UNITY_ANDROID && !UNITY_EDITOR
+    private IEnumerator TryNativeGalleryAndroid()
+    {
+        LogMessage("🤖 Attempting Android gallery access...");
+        
+        try 
+        {
+            // Try using Android Intent directly for gallery access
+            using (AndroidJavaClass unityPlayer = new AndroidJavaClass("com.unity3d.player.UnityPlayer"))
+            using (AndroidJavaObject currentActivity = unityPlayer.GetStatic<AndroidJavaObject>("currentActivity"))
+            using (AndroidJavaObject intent = new AndroidJavaObject("android.content.Intent"))
+            {
+                intent.Call<AndroidJavaObject>("setAction", "android.intent.action.PICK");
+                intent.Call<AndroidJavaObject>("setType", "image/*");
+                
+                currentActivity.Call("startActivity", intent);
+                LogMessage("✅ Android gallery launched");
+                
+                // Note: In production, you'd need to handle the result callback
+                ShowError("Gallery opened! In production, implement result callback to get selected image.");
+            }
+        }
+        catch (System.Exception ex)
+        {
+            LogError($"Android gallery error: {ex.Message}");
+            ShowError("Install Unity Native Gallery package for full Android support.");
+        }
+        
+        yield return null;
+    }
+    
+    private IEnumerator TryNativeCameraAndroid()
+    {
+        LogMessage("📷 Attempting Android camera access...");
+        
+        try
+        {
+            // Try using Android Intent for camera
+            using (AndroidJavaClass unityPlayer = new AndroidJavaClass("com.unity3d.player.UnityPlayer"))
+            using (AndroidJavaObject currentActivity = unityPlayer.GetStatic<AndroidJavaObject>("currentActivity"))
+            using (AndroidJavaObject intent = new AndroidJavaObject("android.content.Intent"))
+            {
+                intent.Call<AndroidJavaObject>("setAction", "android.provider.MediaStore.ACTION_IMAGE_CAPTURE");
+                
+                currentActivity.Call("startActivity", intent);
+                LogMessage("✅ Android camera launched");
+                
+                ShowError("Camera opened! In production, implement result callback to get captured image.");
+            }
+        }
+        catch (System.Exception ex)
+        {
+            LogError($"Android camera error: {ex.Message}");
+            ShowError("Install Unity Native Gallery package for full Android camera support.");
+        }
+        
         yield return null;
     }
     #endif
     
     #if UNITY_IOS && !UNITY_EDITOR
-    private IEnumerator PickImageIOS()
+    private IEnumerator TryNativeGalleryIOS()
     {
-        // iOS implementation using UIImagePickerController (requires native plugin in production)
-        // For demonstration, show how this would work
-        LogMessage("iOS image picker would launch here");
+        LogMessage("🍎 Attempting iOS photo gallery access...");
         
-        // In production, you would:
-        // 1. Install Unity Native Gallery package from Asset Store
-        // 2. Or create custom iOS plugin with Objective-C code like:
-        // UIImagePickerController *picker = [[UIImagePickerController alloc] init];
-        // picker.sourceType = UIImagePickerControllerSourceTypePhotoLibrary;
+        // iOS requires native plugin for gallery access
+        // The Unity Native Gallery package handles this automatically
+        LogMessage("iOS gallery access requires Unity Native Gallery package");
+        ShowError("Install Unity Native Gallery package from Asset Store for iOS photo selection.");
         
-        ShowError("Image picking ready for iOS deployment. Install Unity Native Gallery package for full functionality.");
+        yield return null;
+    }
+    
+    private IEnumerator TryNativeCameraIOS()
+    {
+        LogMessage("📷 Attempting iOS camera access...");
+        
+        // iOS requires native plugin for camera access
+        LogMessage("iOS camera access requires Unity Native Gallery package");
+        ShowError("Install Unity Native Gallery package from Asset Store for iOS camera access.");
+        
         yield return null;
     }
     #endif
@@ -1426,51 +1771,6 @@ public class MobileCompanionUI : MonoBehaviour
         public bool success;
         public string description;
         public string error;
-    }
-    
-    private IEnumerator ProcessSelectedImage(string imagePath)
-    {
-        LogMessage($"Processing selected image: {imagePath}");
-        
-        try
-        {
-            // Load the image as texture
-            byte[] imageBytes = System.IO.File.ReadAllBytes(imagePath);
-            Texture2D texture = new Texture2D(2, 2);
-            
-            if (texture.LoadImage(imageBytes))
-            {
-                // Convert to base64 for API
-                string base64Image = System.Convert.ToBase64String(imageBytes);
-                
-                // Add image to chat UI
-                AddImageMessage(texture, "Image uploaded for analysis", true); // true = user message
-                
-                // Send to realtime chat for analysis
-                if (realtimeChat != null)
-                {
-                    realtimeChat.AnalyzeUploadedImage(base64Image);
-                }
-                else
-                {
-                    ShowError("Realtime chat not available for image analysis");
-                }
-                
-                LogMessage("Image uploaded and sent for analysis");
-            }
-            else
-            {
-                LogError("Failed to load image texture");
-                ShowError("Failed to load the selected image");
-            }
-        }
-        catch (System.Exception ex)
-        {
-            LogError($"Error processing image: {ex.Message}");
-            ShowError($"Error processing image: {ex.Message}");
-        }
-        
-        yield return null;
     }
     
     // Audio Manager Event Handlers

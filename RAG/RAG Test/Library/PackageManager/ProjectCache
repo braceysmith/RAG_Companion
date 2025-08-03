@@ -5,16 +5,16 @@ m_ProjectFiles:
     m_ContentTrackingEnabled: 1
     m_ModificationDate:
       serializedVersion: 2
-      ticks: 638890519540000000
-    m_Hash: 994934209
+      ticks: 638898275840000000
+    m_Hash: 2710283634
   m_LockFileStatus:
     m_FilePath: /Volumes/TREEHOUSE/_Github/RAG_Companion/RAG/RAG Test/Packages/packages-lock.json
     m_PathExists: 1
     m_ContentTrackingEnabled: 1
     m_ModificationDate:
       serializedVersion: 2
-      ticks: 638890519540000000
-    m_Hash: 1548008673
+      ticks: 638898276430000000
+    m_Hash: 3032705875
 m_EmbeddedPackageManifests:
   m_ManifestsStatus: {}
 m_LocalPackages:
@@ -138,6 +138,72 @@ m_ResolvedPackages:
     compatibilityLevel: 0
     minimumPackageVersion: 2.0.5
     minimumUnityVersion: 2023.2.0a18
+- packageId: com.yasirkula.nativecamera@https://github.com/yasirkula/UnityNativeCamera.git
+  testable: 0
+  isDirectDependency: 1
+  version: 1.5.0
+  source: 5
+  resolvedPath: /Volumes/TREEHOUSE/_Github/RAG_Companion/RAG/RAG Test/Library/PackageCache/com.yasirkula.nativecamera
+  assetPath: Packages/com.yasirkula.nativecamera
+  name: com.yasirkula.nativecamera
+  displayName: Native Camera
+  author:
+    name: 
+    email: 
+    url: 
+  category: 
+  type: 
+  description: This plugin helps you take pictures/record videos natively with your
+    device's camera on Android and iOS. It has built-in support for runtime permissions,
+    as well.
+  errors: []
+  versions:
+    all: []
+    compatible: []
+    recommended: 
+    deprecated: []
+  dependencies: []
+  resolvedDependencies: []
+  keywords: []
+  registry:
+    id: main
+    name: 
+    url: https://packages.unity.com
+    scopes: []
+    isDefault: 1
+    capabilities: 7
+    configSource: 0
+  hideInEditor: 1
+  entitlements:
+    licensingModel: 0
+  isAssetStorePackage: 0
+  datePublishedTicks: 0
+  documentationUrl: https://github.com/yasirkula/UnityNativeCamera
+  hasRepository: 0
+  repository:
+    type: 
+    url: 
+    revision: 
+    path: 
+  unityLifecycle:
+    version: 
+    nextVersion: 
+    recommendedVersion: 
+    isDeprecated: 0
+    deprecationMessage: 
+  isDeprecated: 0
+  deprecationMessage: 
+  git:
+    hash: 72f5ebba26c219b4c4cda202bff2f59bfdaa47f8
+    revision: HEAD
+  upmReserved: 
+  assetStore:
+    productId: 
+  fingerprint: 72f5ebba26c219b4c4cda202bff2f59bfdaa47f8
+  editorCompatibility:
+    compatibilityLevel: 0
+    minimumPackageVersion: 
+    minimumUnityVersion: 
 - packageId: com.unity.collab-proxy@2.8.2
   testable: 0
   isDirectDependency: 1
