@@ -260,3 +260,54 @@ class RAGDatabase:
                     "metadata": metadata or {}
                 })
                 await conn.commit()
+    
+    async def store_user_profile(self, user_id: str, profile_data: dict):
+        """Store user profile information in database"""
+        import json
+        import time
+        try:
+            async with await psycopg.AsyncConnection.connect(self.db_url) as conn:
+                register_vector(conn)
+                async with conn.cursor() as cur:
+                    memory_id = f"profile_{user_id}_{int(time.time())}"
+                    
+                    # Store as JSON in content and metadata
+                    content = f"User profile for {user_id}: {json.dumps(profile_data)}"
+                    
+                    await cur.execute("""
+                        INSERT INTO user_memory (
+                            memory_id, user_id, memory_type, content, metadata
+                        ) VALUES (
+                            %(memory_id)s, %(user_id)s, 'profile', %(content)s, %(metadata)s
+                        )
+                        ON CONFLICT (memory_id) 
+                        DO UPDATE SET content = %(content)s, metadata = %(metadata)s, updated_at = NOW()
+                    """, {
+                        "memory_id": memory_id,
+                        "user_id": user_id,
+                        "content": content,
+                        "metadata": profile_data
+                    })
+                    await conn.commit()
+        except Exception as e:
+            print(f"❌ Error storing user profile: {e}")
+    
+    async def get_user_profile(self, user_id: str):
+        """Retrieve user profile information from database"""
+        try:
+            async with await psycopg.AsyncConnection.connect(self.db_url) as conn:
+                register_vector(conn)
+                async with conn.cursor() as cur:
+                    await cur.execute("""
+                        SELECT metadata FROM user_memory 
+                        WHERE user_id = %(user_id)s AND memory_type = 'profile'
+                        ORDER BY updated_at DESC LIMIT 1
+                    """, {"user_id": user_id})
+                    
+                    row = await cur.fetchone()
+                    if row and row[0]:
+                        return row[0]  # metadata contains the profile data
+                    return {}
+        except Exception as e:
+            print(f"❌ Error retrieving user profile: {e}")
+            return {}

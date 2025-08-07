@@ -303,6 +303,9 @@ async def process_audio_endpoint(
         # Read audio file
         audio_data = await audio.read()
         
+        # Load user profile from database if needed
+        await load_user_profile_if_needed(user_id)
+        
         # Get user profile
         user_profile = user_profiles.get(user_id, {})
         
@@ -845,12 +848,21 @@ def get_conversation_context(user_id: str) -> str:
     
     return "\n".join(context_parts) if context_parts else ""
 
-def store_personal_info_simple(user_id: str, info: dict):
+async def store_personal_info_simple(user_id: str, info: dict):
     """Store personal information in a simple way"""
     try:
+        # Load existing profile from database
+        existing_profile = {}
+        if database_available:
+            try:
+                existing_profile = await db.get_user_profile(user_id) or {}
+                print(f"Loaded existing profile from database: {existing_profile}")
+            except Exception as e:
+                print(f"Error loading profile from database: {e}")
+        
         # Store in memory first (always works)
         if user_id not in user_profiles:
-            user_profiles[user_id] = {}
+            user_profiles[user_id] = existing_profile.copy()
         
         # Clean up existing location data if it's corrupted
         if "location" in user_profiles[user_id]:
@@ -873,35 +885,53 @@ def store_personal_info_simple(user_id: str, info: dict):
             user_profiles[user_id][key] = value
             print(f"Stored in memory: {key} = {value} for user {user_id}")
         
-        # Also try to store in database if available (fire and forget)
-        try:
-            for key, value in info.items():
-                memory_data = {
-                    "user_id": user_id,
-                    "memory_type": "profile", 
-                    "content": f"User's {key}: {value}",
-                    "metadata": {"info_type": key, "value": value}
-                }
-                print(f"Attempting database storage: {key} = {value}")
-        except Exception as db_error:
-            print(f"Database storage failed (using memory backup): {db_error}")
+        # Store updated profile in database
+        if database_available and info:
+            try:
+                await db.store_user_profile(user_id, user_profiles[user_id])
+                print(f"✅ Saved profile to database for user {user_id}")
+            except Exception as db_error:
+                print(f"❌ Database storage failed (using memory backup): {db_error}")
             
     except Exception as e:
         print(f"Could not store personal info: {e}")
 
-def get_user_name(user_id: str) -> str:
+async def get_user_name(user_id: str) -> str:
     """Try to retrieve user's name from stored memories"""
     try:
         # Check memory storage first
         if user_id in user_profiles and "name" in user_profiles[user_id]:
             return user_profiles[user_id]["name"]
         
-        # Could add database lookup here later
+        # Check database if available
+        if database_available:
+            try:
+                profile = await db.get_user_profile(user_id)
+                if profile and "name" in profile:
+                    # Load into memory cache for faster access
+                    if user_id not in user_profiles:
+                        user_profiles[user_id] = {}
+                    user_profiles[user_id].update(profile)
+                    return profile["name"]
+            except Exception as e:
+                print(f"Error loading user profile: {e}")
+        
         return ""
         
     except Exception as e:
         print(f"Could not retrieve user name: {e}")
         return ""
+
+async def load_user_profile_if_needed(user_id: str):
+    """Load user profile from database if not in memory"""
+    if user_id not in user_profiles and database_available:
+        try:
+            profile = await db.get_user_profile(user_id)
+            if profile:
+                user_profiles[user_id] = profile
+                print(f"📋 Loaded user profile from database: {profile}")
+        except Exception as e:
+            print(f"Error loading user profile: {e}")
 
 async def generate_conversational_response(user_id: str, query: str, personal_info: dict) -> str:
     """Generate a fluid conversational response with personal context and tools"""
@@ -1067,6 +1097,9 @@ async def rag_query_sync(request: dict):
         user_id = request.get('user_id', 'anonymous')
         top_k = request.get('top_k', 5)
         
+        # Load user profile from database if needed
+        await load_user_profile_if_needed(user_id)
+        
         # Debug: Log the query request details
         print(f"📝 Query request - user_id: {user_id}, query: {query_text[:50]}...")
         
@@ -1089,7 +1122,7 @@ async def rag_query_sync(request: dict):
             # Store other personal info normally
             other_info = {k: v for k, v in personal_info.items() if k != "reminder_created"}
             if other_info:
-                store_personal_info_simple(user_id, other_info)
+                await store_personal_info_simple(user_id, other_info)
         
         # Store user message for future memory/context (disabled for now to prevent errors)
         # try:
@@ -1234,7 +1267,7 @@ async def store_memory(request: MemoryRequest):
                     del personal_info["reminder_request"]
                     print(f"✅ Created reminder {reminder_id}: {reminder_data['content']}")
                 
-                store_personal_info_simple(request.user_id, personal_info)
+                await store_personal_info_simple(request.user_id, personal_info)
                 print(f"Extracted and stored personal info: {personal_info}")
                 
                 # Debug: Show current user profile
