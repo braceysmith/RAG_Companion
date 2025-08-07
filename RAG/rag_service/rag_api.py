@@ -892,6 +892,17 @@ async def store_personal_info_simple(user_id: str, info: dict):
                 print(f"✅ Saved profile to database for user {user_id}")
             except Exception as db_error:
                 print(f"❌ Database storage failed (using memory backup): {db_error}")
+        
+        # Always save to JSON backup file as failsafe
+        if info:
+            try:
+                import json
+                backup_file = f"user_profile_{user_id}.json"
+                with open(backup_file, 'w') as f:
+                    json.dump(user_profiles[user_id], f, indent=2)
+                print(f"💾 Saved profile backup to {backup_file}")
+            except Exception as e:
+                print(f"❌ File backup failed: {e}")
             
     except Exception as e:
         print(f"Could not store personal info: {e}")
@@ -923,15 +934,31 @@ async def get_user_name(user_id: str) -> str:
         return ""
 
 async def load_user_profile_if_needed(user_id: str):
-    """Load user profile from database if not in memory"""
-    if user_id not in user_profiles and database_available:
-        try:
-            profile = await db.get_user_profile(user_id)
-            if profile:
-                user_profiles[user_id] = profile
-                print(f"📋 Loaded user profile from database: {profile}")
-        except Exception as e:
-            print(f"Error loading user profile: {e}")
+    """Load user profile from database or file backup if not in memory"""
+    if user_id not in user_profiles:
+        # Try database first
+        if database_available:
+            try:
+                profile = await db.get_user_profile(user_id)
+                if profile:
+                    user_profiles[user_id] = profile
+                    print(f"📋 Loaded user profile from database: {profile}")
+                    return
+            except Exception as e:
+                print(f"Error loading user profile from database: {e}")
+        
+        # Fallback to JSON file backup
+        import json
+        import os
+        backup_file = f"user_profile_{user_id}.json"
+        if os.path.exists(backup_file):
+            try:
+                with open(backup_file, 'r') as f:
+                    profile = json.load(f)
+                    user_profiles[user_id] = profile
+                    print(f"📋 Loaded user profile from backup file: {profile}")
+            except Exception as e:
+                print(f"Error loading profile backup: {e}")
 
 async def generate_conversational_response(user_id: str, query: str, personal_info: dict) -> str:
     """Generate a fluid conversational response with personal context and tools"""
