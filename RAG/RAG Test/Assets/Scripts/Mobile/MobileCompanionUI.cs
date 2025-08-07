@@ -37,6 +37,13 @@ public class MobileCompanionUI : MonoBehaviour
     [SerializeField] private Image audioWaveform;
     [SerializeField] private TextMeshProUGUI audioStatusText;
     
+    [Header("Image Preview UI")]
+    [SerializeField] private GameObject imagePreviewPanel;
+    [SerializeField] private Image previewImage;
+    [SerializeField] private TMP_InputField imageDescriptionInput;
+    [SerializeField] private Button sendImageButton;
+    [SerializeField] private Button cancelImageButton;
+    
     [Header("Status Indicators")]
     [SerializeField] private Image connectionStatusIcon;
     [SerializeField] private TextMeshProUGUI statusText;
@@ -68,6 +75,10 @@ public class MobileCompanionUI : MonoBehaviour
     private bool isPlayingAudio = false;
     private bool pendingVoiceInputStart = false; // Track if user wants to start voice input
     private Coroutine connectionTimeoutCoroutine; // Track connection timeout
+    
+    // Image preview state
+    private string currentImageBase64;
+    private Texture2D currentImageTexture;
     
     // Component references
     private MobileRAGCompanionSystem companionSystem;
@@ -149,16 +160,28 @@ public class MobileCompanionUI : MonoBehaviour
             voiceRecordButton.onClick.AddListener(OnVoiceButtonClicked);
         }
         
-        // Setup image upload button (gallery)
+        // Setup image upload button (gallery) - clear existing listeners first
         if (imageUploadButton != null)
         {
+            imageUploadButton.onClick.RemoveAllListeners();
             imageUploadButton.onClick.AddListener(OnImageUploadButtonClicked);
+            LogMessage($"✅ Gallery button listener assigned to: {imageUploadButton.name}");
+        }
+        else
+        {
+            LogError("❌ imageUploadButton is NULL in Unity Inspector!");
         }
         
-        // Setup camera button
+        // Setup camera button - clear existing listeners first
         if (cameraButton != null)
         {
+            cameraButton.onClick.RemoveAllListeners();
             cameraButton.onClick.AddListener(OnCameraButtonClicked);
+            LogMessage($"✅ Camera button listener assigned to: {cameraButton.name}");
+        }
+        else
+        {
+            LogError("❌ cameraButton is NULL in Unity Inspector!");
         }
         
         // Setup error panel buttons
@@ -169,6 +192,27 @@ public class MobileCompanionUI : MonoBehaviour
         if (closeErrorButton != null)
         {
             closeErrorButton.onClick.AddListener(OnCloseErrorButtonClicked);
+        }
+        
+        // Setup image preview buttons
+        if (sendImageButton != null)
+        { 
+            sendImageButton.onClick.AddListener(OnSendImageButtonClicked);
+            LogMessage($"✅ Send image button listener assigned to: {sendImageButton.name}");
+        }
+        else
+        {
+            LogMessage("⚠️  sendImageButton is NULL in Unity Inspector - image preview won't work");
+        }
+        
+        if (cancelImageButton != null)
+        {
+            cancelImageButton.onClick.AddListener(OnCancelImageButtonClicked);
+            LogMessage($"✅ Cancel image button listener assigned to: {cancelImageButton.name}");
+        }
+        else
+        {
+            LogMessage("⚠️  cancelImageButton is NULL in Unity Inspector - image preview won't work");
         }
         
         // Initialize status indicators
@@ -1364,20 +1408,26 @@ public class MobileCompanionUI : MonoBehaviour
                     }
                 }, "Select Image", "image/*");
                 
+                LogMessage("🖼️ Waiting for user to finish selecting image...");
+                
                 // Wait for user selection
                 while (!imageSelected && !NativeGallery.IsMediaPickerBusy())
                 {
                     yield return new WaitForSeconds(0.1f);
                 }
                 
+                LogMessage($"🖼️ Selection completed. imageSelected: {imageSelected}, imagePath: '{imagePath}'");
+                
                 // Process selected image
                 if (!string.IsNullOrEmpty(imagePath))
                 {
+                    LogMessage($"🖼️ About to call ProcessSelectedImage with path: {imagePath}");
                     yield return StartCoroutine(ProcessSelectedImage(imagePath));
+                    LogMessage("🖼️ ProcessSelectedImage coroutine completed");
                 }
                 else
                 {
-                    LogMessage("❌ No image selected");
+                    LogMessage("❌ No image selected - imagePath is null or empty");
                 }
             }
             else
@@ -1410,15 +1460,15 @@ public class MobileCompanionUI : MonoBehaviour
             {
                 LogMessage($"✅ Image loaded: {texture.width}x{texture.height}");
                 
-                // Add to chat UI
+                // Store image data for preview
+                currentImageTexture = texture;
+                currentImageBase64 = System.Convert.ToBase64String(imageData);
+                
+                // Show image preview instead of immediately sending
                 string fileName = System.IO.Path.GetFileName(imagePath);
-                AddImageMessage(texture, $"Selected image: {fileName}", true);
+                ShowImagePreviewPanel(texture, fileName);
                 
-                // Convert to base64 and send for analysis
-                string base64Image = System.Convert.ToBase64String(imageData);
-                StartCoroutine(SendImageToRAGServer(base64Image));
-                
-                LogMessage("🚀 Image sent for AI analysis");
+                LogMessage("📱 Image preview shown - waiting for user input");
             }
             else
             {
@@ -1507,17 +1557,15 @@ public class MobileCompanionUI : MonoBehaviour
             {
                 LogMessage($"✅ Photo loaded successfully: {texture.width}x{texture.height}");
                 
-                // Add to chat UI
-                AddImageMessage(texture, "Captured photo", true);
-                
-                // Convert to base64 for analysis
+                // Store image data for preview  
+                currentImageTexture = texture;
                 byte[] imageBytes = texture.EncodeToPNG();
-                string base64Image = System.Convert.ToBase64String(imageBytes);
+                currentImageBase64 = System.Convert.ToBase64String(imageBytes);
                 
-                // Send to RAG server for analysis
-                StartCoroutine(SendImageToRAGServer(base64Image));
+                // Show image preview instead of immediately sending
+                ShowImagePreviewPanel(texture, "Captured Photo");
                 
-                LogMessage("🚀 Captured photo sent for AI analysis");
+                LogMessage("📱 Captured photo preview shown - waiting for user input");
             }
             else
             {
@@ -2023,6 +2071,206 @@ public class MobileCompanionUI : MonoBehaviour
     {
         LogMessage("Setting UI to Responding state - INTERRUPT button should be visible");
         SetState(ConversationState.Responding);
+    }
+    
+    // Image Preview Methods
+    private void ShowImagePreviewPanel(Texture2D imageTexture, string imageName)
+    {
+        LogMessage($"📱 Showing image preview panel for: {imageName}");
+        
+        if (imagePreviewPanel != null)
+        {
+            // Set the preview image
+            if (previewImage != null)
+            {
+                // Create sprite from texture for UI Image component
+                Sprite imageSprite = Sprite.Create(imageTexture, 
+                    new Rect(0, 0, imageTexture.width, imageTexture.height), 
+                    new Vector2(0.5f, 0.5f));
+                previewImage.sprite = imageSprite;
+            }
+            
+            // Set placeholder text in input field
+            if (imageDescriptionInput != null)
+            {
+                imageDescriptionInput.text = "";
+                imageDescriptionInput.placeholder.GetComponent<TextMeshProUGUI>().text = 
+                    "Describe what you want to know about this image...";
+            }
+            
+            // Show the preview panel
+            imagePreviewPanel.SetActive(true);
+            LogMessage("✅ Image preview panel displayed");
+        }
+        else
+        {
+            LogError("❌ imagePreviewPanel is NULL - cannot show preview");
+            // Fallback: send immediately without preview
+            AddImageMessage(imageTexture, imageName, true);
+            StartCoroutine(SendImageToRAGServer(currentImageBase64));
+        }
+    }
+    
+    private void OnSendImageButtonClicked()
+    {
+        LogMessage("✅ Send image button clicked");
+        
+        if (string.IsNullOrEmpty(currentImageBase64))
+        {
+            LogError("No image data available to send");
+            return;
+        }
+        
+        // Get user's description/question
+        string userDescription = "";
+        if (imageDescriptionInput != null)
+        {
+            userDescription = imageDescriptionInput.text.Trim();
+        }
+        
+        // Add image to chat
+        if (currentImageTexture != null)
+        {
+            string displayText = string.IsNullOrEmpty(userDescription) ? 
+                "Image for analysis" : 
+                $"Image: {userDescription}";
+            AddImageMessage(currentImageTexture, displayText, true);
+        }
+        
+        // Hide preview panel
+        HideImagePreviewPanel();
+        
+        // Send to RAG server with user's description
+        StartCoroutine(SendImageToRAGServerWithDescription(currentImageBase64, userDescription));
+        
+        LogMessage($"🚀 Image sent for analysis with description: '{userDescription}'");
+    }
+    
+    private void OnCancelImageButtonClicked()
+    {
+        LogMessage("❌ Cancel image button clicked");
+        
+        // Hide preview panel
+        HideImagePreviewPanel();
+        
+        // Clear stored image data
+        ClearImagePreviewData();
+        
+        LogMessage("📱 Image preview cancelled");
+    }
+    
+    private void HideImagePreviewPanel()
+    {
+        if (imagePreviewPanel != null)
+        {
+            imagePreviewPanel.SetActive(false);
+            LogMessage("📱 Image preview panel hidden");
+        }
+    }
+    
+    private void ClearImagePreviewData()
+    {
+        currentImageBase64 = null;
+        
+        if (currentImageTexture != null)
+        {
+            DestroyImmediate(currentImageTexture);
+            currentImageTexture = null;
+        }
+        
+        if (imageDescriptionInput != null)
+        {
+            imageDescriptionInput.text = "";
+        }
+        
+        LogMessage("🗑️ Image preview data cleared");
+    }
+    
+    private IEnumerator SendImageToRAGServerWithDescription(string base64Image, string userDescription)
+    {
+        LogMessage($"📤 Sending image to RAG server with description: '{userDescription}'");
+        
+        // Determine the question to send
+        string question = string.IsNullOrEmpty(userDescription) ? 
+            "Please describe what you see in this image in detail." : 
+            userDescription;
+        
+        // Get RAG API URL and userId from the realtime chat component using reflection
+        if (realtimeChat == null)
+        {
+            LogError("Realtime chat component not available");
+            ShowError("Unable to connect to analysis service.");
+            yield break;
+        }
+        
+        var ragApiUrlField = realtimeChat.GetType().GetField("ragApiUrl", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+        var userIdField = realtimeChat.GetType().GetField("userId", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+        
+        string ragApiUrl = ragApiUrlField?.GetValue(realtimeChat)?.ToString() ?? "";
+        string userId = userIdField?.GetValue(realtimeChat)?.ToString() ?? "mobile-user";
+        
+        if (string.IsNullOrEmpty(ragApiUrl))
+        {
+            LogError("RAG API URL not available");
+            ShowError("Unable to connect to image analysis service.");
+            yield break;
+        }
+        
+        // Use the existing SendImageToRAGServer logic with the custom question
+        var requestBody = new ImageAnalysisRequest
+        {
+            image_data = base64Image,
+            question = question,
+            user_id = userId
+        };
+        
+        string jsonData = JsonUtility.ToJson(requestBody);
+        
+        using (UnityWebRequest request = new UnityWebRequest($"{ragApiUrl}/analyze_image", "POST"))
+        {
+            request.uploadHandler = new UploadHandlerRaw(System.Text.Encoding.UTF8.GetBytes(jsonData));
+            request.downloadHandler = new DownloadHandlerBuffer();
+            request.SetRequestHeader("Content-Type", "application/json");
+            request.timeout = 30;
+            
+            LogMessage("📡 Sending image analysis request to RAG server...");
+            yield return request.SendWebRequest();
+            
+            if (request.result == UnityWebRequest.Result.Success)
+            {
+                try
+                {
+                    var response = JsonUtility.FromJson<ImageAnalysisResponse>(request.downloadHandler.text);
+                    
+                    if (response != null && response.success && !string.IsNullOrEmpty(response.description))
+                    {
+                        LogMessage($"✅ Image analysis successful: {response.description.Substring(0, Math.Min(100, response.description.Length))}...");
+                        
+                        // Send the description to realtime chat for audio response
+                        string analysisPrompt = $"Speak as if you can see the image you are describing: {response.description}";
+                        if (realtimeChat != null)
+                        {
+                            realtimeChat.SendTextMessage(analysisPrompt);
+                        }
+                    }
+                    else
+                    {
+                        LogError("Invalid response from RAG server");
+                        ShowError("Failed to analyze image. Please try again.");
+                    }
+                }
+                catch (System.Exception ex)
+                {
+                    LogError($"Error parsing image analysis response: {ex.Message}");
+                    ShowError("Error processing image analysis response.");
+                }
+            }
+            else
+            {
+                LogError($"Image analysis request failed: {request.error}");
+                ShowError($"Image analysis failed: {request.error}");
+            }
+        }
     }
     
     // Public getters

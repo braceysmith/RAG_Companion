@@ -1065,25 +1065,28 @@ public class MobileRealtimeChat : MonoBehaviour
         if (companionUI != null)
         {
             companionUI.ShowProcessingIndicator(false);
-            companionUI.SetToRespondingState();
+            companionUI.UpdateStatusText("AI is responding...");
         }
     }
     
     private void HandleResponseComplete()
     {
+        LogMessage("🎵 RESPONSE.DONE received - AI response COMPLETELY finished");
+        LogMessage($"🎵 Previous isAIResponding state: {isAIResponding}");
+        
         isAIResponding = false;
         LogMessage("✅ AI response COMPLETELY finished - resetting to idle state");
         
         // NOW it's safe to reset UI state - the entire response is done
         if (companionUI != null)
         {
+            LogMessage("🎵 Turning off audio playback indicator - response is fully complete");
             companionUI.ShowAudioPlaybackIndicator(false);
             companionUI.ShowProcessingIndicator(false);
             companionUI.UpdateStatusText("Ready - Tap to talk");
-            
-            // Reset UI state for continuous conversation
-            companionUI.ResetToIdleState();
         }
+        
+        LogMessage("🎵 Audio playback should now be complete and UI reset to idle");
     }
     
     private void HandleAudioResponseDelta(JObject message)
@@ -1098,7 +1101,8 @@ public class MobileRealtimeChat : MonoBehaviour
             companionUI.ShowAudioPlaybackIndicator(true);
             
             // Transition to PlayingAudio state for interrupt capability
-            companionUI.SetToPlayingAudioState();
+            companionUI.ShowAudioPlaybackIndicator(true);
+            companionUI.UpdateStatusText("AI is speaking...");
             isAIResponding = true;
         }
         
@@ -1698,13 +1702,16 @@ public class MobileRealtimeChat : MonoBehaviour
             companionUI.ShowAudioPlaybackIndicator(true);
             
             // Transition to PlayingAudio state which shows INTERRUPT button by default
-            companionUI.SetToPlayingAudioState();
+            companionUI.ShowAudioPlaybackIndicator(true);
+            companionUI.UpdateStatusText("AI is speaking...");
         }
     }
     
     private void HandleOutputAudioBufferStopped(JObject message)
     {
-        LogMessage("AI audio buffer chunk stopped - continuing to wait for response.done");
+        var responseId = message["response_id"]?.ToString();
+        LogMessage($"🎵 AI audio buffer chunk stopped (response_id: {responseId}) - continuing to wait for response.done");
+        LogMessage($"🎵 isAIResponding: {isAIResponding} - Audio should continue playing until response.done");
         
         // IMPORTANT: Don't reset UI state here! This just means one audio chunk ended.
         // The AI might still be generating more audio chunks.
@@ -1712,6 +1719,8 @@ public class MobileRealtimeChat : MonoBehaviour
         
         // Keep the audio playback indicator active until response.done
         // This prevents premature audio cutoff
+        
+        LogMessage("🎵 Audio buffer stopped but UI state remains active for continued playback");
     }
     
     private void HandleResponseCancelled(JObject message)
@@ -2335,6 +2344,8 @@ public class MobileRealtimeChat : MonoBehaviour
                "You can remember information from previous conversations with this user. " +
                "Respond naturally and conversationally, incorporating relevant personal details when available. " +
                "Keep responses concise but informative. " +
+               "REMINDER CAPABILITY: You CAN set reminders for users! When they ask you to 'remind me' of something, " +
+               "acknowledge that you'll set the reminder for them. The system will automatically detect and process reminder requests. " +
                "IMPORTANT: Only reference information you have been explicitly provided in your context. " +
                "If you don't know something specific (like names, dates, or details), " +
                "clearly state that you don't have that information rather than guessing or making something up.";
@@ -2453,7 +2464,8 @@ public class MobileRealtimeChat : MonoBehaviour
                 if (companionUI != null)
                 {
                     companionUI.AddMessage(message, "assistant", true);
-                    companionUI.SetToPlayingAudioState();
+                    companionUI.ShowAudioPlaybackIndicator(true);
+            companionUI.UpdateStatusText("AI is speaking...");
                     companionUI.UpdateStatusText("AI is speaking...");
                 }
             }
@@ -2546,7 +2558,8 @@ public class MobileRealtimeChat : MonoBehaviour
                 if (companionUI != null)
                 {
                     companionUI.AddMessage(aiMessage, "assistant", true);
-                    companionUI.SetToPlayingAudioState();
+                    companionUI.ShowAudioPlaybackIndicator(true);
+            companionUI.UpdateStatusText("AI is speaking...");
                     companionUI.UpdateStatusText("Delivering your reminder...");
                 }
             }

@@ -3582,19 +3582,7 @@ MonoBehaviour:
   m_TargetGraphic: {fileID: 1111993366}
   m_OnClick:
     m_PersistentCalls:
-      m_Calls:
-      - m_Target: {fileID: 630904271}
-        m_TargetAssemblyTypeName: MobileRealtimeChat, Assembly-CSharp
-        m_MethodName: TestAIResponse
-        m_Mode: 1
-        m_Arguments:
-          m_ObjectArgument: {fileID: 0}
-          m_ObjectArgumentAssemblyTypeName: UnityEngine.Object, UnityEngine
-          m_IntArgument: 0
-          m_FloatArgument: 0
-          m_StringArgument: 
-          m_BoolArgument: 0
-        m_CallState: 2
+      m_Calls: []
 --- !u!1 &1118037511
 GameObject:
   m_ObjectHideFlags: 0
@@ -5132,19 +5120,7 @@ MonoBehaviour:
   m_TargetGraphic: {fileID: 2065771252}
   m_OnClick:
     m_PersistentCalls:
-      m_Calls:
-      - m_Target: {fileID: 630904271}
-        m_TargetAssemblyTypeName: MobileRealtimeChat, Assembly-CSharp
-        m_MethodName: TestAIResponse
-        m_Mode: 1
-        m_Arguments:
-          m_ObjectArgument: {fileID: 0}
-          m_ObjectArgumentAssemblyTypeName: UnityEngine.Object, UnityEngine
-          m_IntArgument: 0
-          m_FloatArgument: 0
-          m_StringArgument: 
-          m_BoolArgument: 0
-        m_CallState: 2
+      m_Calls: []
 --- !u!1 &2084453245
 GameObject:
   m_ObjectHideFlags: 0

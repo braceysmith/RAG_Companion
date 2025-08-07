@@ -97,3 +97,18 @@ InitTestScene*.unity*
 
 # Auto-generated scenes by play mode tests
 /[Aa]ssets/[Ii]nit[Tt]est[Ss]cene*.unity*
+
+# Additional security ignores
+*.env
+*.env.local
+*.env.production
+.env*
+secrets.json
+config.json
+*.key
+*.pem
+*.p12
+*.keystore
+**/PackageCache.md5
+**/.claude/
+**/Claude/
