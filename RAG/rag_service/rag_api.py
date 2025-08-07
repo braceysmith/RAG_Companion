@@ -516,6 +516,25 @@ def extract_personal_info(message: str) -> dict:
         ("i live at ", "location")
     ]
     
+    # Language preference patterns
+    language_patterns = [
+        ("i speak ", "language"),
+        ("my language is ", "language"),
+        ("i prefer ", "language_preference"),
+        ("please speak ", "language_preference"),
+        ("respond in ", "language_preference"),
+        ("talk to me in ", "language_preference"),
+        ("use ", "language_preference"),
+        ("can you speak ", "language_preference"),
+        ("my preferred language is ", "language_preference"),
+        ("i would like you to speak ", "language_preference"),
+        ("switch to ", "language_preference"),
+        ("i understand ", "language"),
+        ("i'm fluent in ", "language"),
+        ("my native language is ", "native_language"),
+        ("my first language is ", "native_language")
+    ]
+    
     # Reminder patterns
     reminder_patterns = [
         ("remind me to ", "reminder"),
@@ -538,7 +557,7 @@ def extract_personal_info(message: str) -> dict:
         ("notify me to ", "reminder")
     ]
     
-    all_patterns = name_patterns + work_patterns + interest_patterns + location_patterns + reminder_patterns
+    all_patterns = name_patterns + work_patterns + interest_patterns + location_patterns + language_patterns + reminder_patterns
     
     for pattern, info_type in all_patterns:
         if pattern in message_lower:

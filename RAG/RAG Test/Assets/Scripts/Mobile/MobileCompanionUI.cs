@@ -1410,10 +1410,18 @@ public class MobileCompanionUI : MonoBehaviour
                 
                 LogMessage("🖼️ Waiting for user to finish selecting image...");
                 
-                // Wait for user selection
-                while (!imageSelected && !NativeGallery.IsMediaPickerBusy())
+                // Wait for user selection - only exit when callback fires OR user cancels
+                float startTime = Time.time;
+                while (!imageSelected)
                 {
                     yield return new WaitForSeconds(0.1f);
+                    
+                    // Safety timeout after 60 seconds (in case user abandons selection)
+                    if (Time.time - startTime > 60f)
+                    {
+                        LogMessage("⏰ Image selection timed out after 60 seconds");
+                        break;
+                    }
                 }
                 
                 LogMessage($"🖼️ Selection completed. imageSelected: {imageSelected}, imagePath: '{imagePath}'");
