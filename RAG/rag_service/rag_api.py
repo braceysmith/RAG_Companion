@@ -480,6 +480,30 @@ async def analyze_image(request: dict):
             "error": str(e)
         }
 
+def is_ai_message(content: str) -> bool:
+    """Detect if a message is from AI (assistant) rather than user"""
+    content_lower = content.lower().strip()
+    
+    # Common AI response patterns
+    ai_patterns = [
+        "hello", "hi there", "i'm here to help", "how can i help", "what can i do",
+        "sure!", "of course", "i'd be happy to", "let me help", "i understand",
+        "here's", "based on", "according to", "i think", "in my opinion",
+        "i can help", "i'll help", "got it!", "understood", "i see",
+        "from now on", "i'll communicate", "何か", "shimashou ka", "nanika"
+    ]
+    
+    # Check if content starts with typical AI response patterns
+    for pattern in ai_patterns:
+        if content_lower.startswith(pattern) or f" {pattern}" in content_lower[:50]:
+            return True
+    
+    # Check for Japanese AI responses
+    if "何か" in content or "しましょうか" in content:
+        return True
+    
+    return False
+
 def extract_personal_info(message: str) -> dict:
     """Extract personal information from user messages"""
     personal_info = {}
@@ -538,6 +562,9 @@ def extract_personal_info(message: str) -> dict:
         ("can you speak ", "language_preference"),
         ("my preferred language is ", "language_preference"),
         ("i would like you to speak ", "language_preference"),
+        ("i would like ", "language_preference"),
+        ("to be my preferred language", "language_preference"),
+        ("preferred language", "language_preference"),
         ("switch to ", "language_preference"),
         ("i understand ", "language"),
         ("i'm fluent in ", "language"),
@@ -1284,9 +1311,15 @@ async def store_memory(request: MemoryRequest):
         
         # Store in memory (using existing personal info system)
         if request.memory_type == "conversation":
-            # Extract personal info and store it
-            personal_info = extract_personal_info(request.content)
-            print(f"🔍 Extracted personal info: {personal_info}")
+            # Only extract personal info from user messages, not AI responses
+            is_ai_response = is_ai_message(request.content)
+            if not is_ai_response:
+                # Extract personal info and store it
+                personal_info = extract_personal_info(request.content)
+                print(f"🔍 Extracted personal info from USER message: {personal_info}")
+            else:
+                personal_info = {}
+                print(f"🔍 Skipping personal info extraction from AI response")
             if personal_info:
                 # Handle reminder requests specially
                 if "reminder_request" in personal_info:
