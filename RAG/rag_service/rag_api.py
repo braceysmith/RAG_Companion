@@ -490,7 +490,14 @@ def extract_personal_info(message: str) -> dict:
     name_patterns = [
         ("my name is ", "name"),
         ("call me ", "name"), 
-        ("my name's ", "name")
+        ("my name's ", "name"),
+        ("i am ", "name"),
+        ("i'm ", "name"),
+        ("this is ", "name"),
+        ("name is ", "name"),
+        ("it's ", "name"),
+        ("i am called ", "name"),
+        ("people call me ", "name")
     ]
     
     # Work/profession patterns

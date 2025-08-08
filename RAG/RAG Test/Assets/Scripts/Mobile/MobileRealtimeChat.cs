@@ -1086,7 +1086,24 @@ public class MobileRealtimeChat : MonoBehaviour
             companionUI.UpdateStatusText("Ready - Tap to talk");
         }
         
+        // Add safety timeout to ensure UI resets even if audio events are missed
+        StartCoroutine(SafetyResetUIAfterDelay(10f));
+        
         LogMessage("🎵 Audio playback should now be complete and UI reset to idle");
+    }
+    
+    private IEnumerator SafetyResetUIAfterDelay(float delay)
+    {
+        yield return new WaitForSeconds(delay);
+        
+        // Only reset if AI is not currently responding to something new
+        if (!isAIResponding && companionUI != null)
+        {
+            LogMessage("🔧 Safety timeout - ensuring UI is in idle state");
+            companionUI.ShowAudioPlaybackIndicator(false);
+            companionUI.ShowProcessingIndicator(false);
+            companionUI.UpdateStatusText("Ready - Tap to talk");
+        }
     }
     
     private void HandleAudioResponseDelta(JObject message)

@@ -551,10 +551,12 @@ public class MobileAudioManager : MonoBehaviour
                 audioSource.Play();
                 
                 LogMessage("Playing AI audio response");
-                OnAudioPlaybackCompleted?.Invoke();
                 
                 // Wait for playback to complete
                 yield return new WaitForSeconds(clip.length);
+                
+                OnAudioPlaybackCompleted?.Invoke();
+                LogMessage("Audio playback completed - event fired");
             }
             else
             {
