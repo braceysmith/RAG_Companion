@@ -19,6 +19,10 @@ numpy>=1.24.0
 # WebSocket enhancements
 websocket-client>=1.6.0
 
+# FastAPI and server dependencies
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+
 # Logging and monitoring
 structlog>=23.1.0
 
