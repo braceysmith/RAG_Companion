@@ -23,6 +23,10 @@ websocket-client>=1.6.0
 fastapi>=0.104.0
 uvicorn[standard]>=0.24.0
 
+# Database dependencies
+psycopg[binary]>=3.1.0
+pgvector>=0.2.0
+
 # Logging and monitoring
 structlog>=23.1.0
 
