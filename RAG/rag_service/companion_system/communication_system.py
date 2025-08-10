@@ -141,8 +141,8 @@ class CommunicationSystem:
     def _start_websocket_server(self):
         """Start WebSocket server for real-time communication"""
         try:
-            async def websocket_handler(websocket, path):
-                await self._handle_websocket_connection(websocket, path)
+            async def websocket_handler(websocket):
+                await self._handle_websocket_connection(websocket, "")
             
             async def start_server():
                 self.websocket_server = await websockets.serve(
@@ -163,6 +163,7 @@ class CommunicationSystem:
     
     async def _handle_websocket_connection(self, websocket: WebSocketServerProtocol, path: str):
         """Handle WebSocket connection"""
+        session_id = None
         try:
             # Wait for authentication message
             auth_message = await websocket.recv()
@@ -206,7 +207,7 @@ class CommunicationSystem:
             logger.error(f"WebSocket error: {e}")
         finally:
             # Clean up session
-            if session_id in self.websocket_sessions:
+            if session_id and session_id in self.websocket_sessions:
                 del self.websocket_sessions[session_id]
     
     async def _handle_websocket_message(self, ws_session: WebSocketSession, message: str):
@@ -237,25 +238,27 @@ class CommunicationSystem:
     async def _handle_chat_message(self, ws_session: WebSocketSession, data: Dict[str, Any]):
         """Handle chat message from WebSocket"""
         try:
-            # Process the message
-            message_id = self.send_message(
-                ws_session.session_id,
-                ws_session.user_id,
-                data.get("content", ""),
-                MessageType(data.get("message_type", "text"))
+            # Create message directly for WebSocket (no need for regular session)
+            message = ChatMessage(
+                message_id=str(uuid.uuid4()),
+                user_id=ws_session.user_id,
+                companion_id=ws_session.companion_id,
+                message_type=MessageType(data.get("message_type", "text")),
+                content=data.get("content", ""),
+                timestamp=datetime.now()
             )
             
             # Send acknowledgment
             await ws_session.websocket.send(json.dumps({
                 "type": "message_received",
-                "message_id": message_id,
+                "message_id": message.message_id,
                 "timestamp": datetime.now().isoformat()
             }))
             
-            # Process and send response
-            response = self.process_message(ws_session.session_id, message_id)
+            # Process message directly (no need for regular session)
+            response = self._process_text_message(message)
             if response:
-                await self._send_chat_response(ws_session, response, message_id)
+                await self._send_chat_response(ws_session, response, message.message_id)
                 
         except Exception as e:
             logger.error(f"Error handling chat message: {e}")
@@ -349,7 +352,8 @@ class CommunicationSystem:
             raise ValueError("Invalid session ID")
         
         session = self.active_sessions[session_id]
-        if session['user_id'] != user_id:
+        # Allow system messages or messages from the session owner
+        if user_id != "system" and session['user_id'] != user_id:
             raise ValueError("User not authorized for this session")
         
         # Create message
@@ -516,9 +520,27 @@ class CommunicationSystem:
                 try:
                     # Use system TTS command
                     if os.name == 'posix':  # macOS/Linux
-                        subprocess.run([
-                            'say', '-o', temp_path, '-v', 'Alex', text
-                        ], check=True, capture_output=True)
+                        # macOS say command works better with .aiff format
+                        if temp_path.endswith('.wav'):
+                            temp_path = temp_path.replace('.wav', '.aiff')
+                        
+                        # Try different voice options for macOS
+                        try:
+                            # First try with default voice
+                            subprocess.run([
+                                'say', '-o', temp_path, text
+                            ], check=True, capture_output=True)
+                        except subprocess.CalledProcessError:
+                            # Fallback to specific voice if available
+                            try:
+                                subprocess.run([
+                                    'say', '-o', temp_path, '-v', 'Alex', text
+                                ], check=True, capture_output=True)
+                            except subprocess.CalledProcessError:
+                                # Last resort: try without voice specification
+                                subprocess.run([
+                                    'say', '-o', temp_path, text
+                                ], check=True, capture_output=True)
                     elif os.name == 'nt':  # Windows
                         # Windows SAPI TTS
                         import pyttsx3
@@ -883,19 +905,24 @@ class CommunicationSystem:
                 else:
                     action_message += f" - this may take about {estimated_duration:.0f} seconds"
             
-            # Store action in session
-            if user_id in self.active_sessions:
-                session = self.active_sessions[user_id]
+            # Store action in session - find session by user_id
+            user_session = None
+            for session_id, session in self.active_sessions.items():
+                if session.get('user_id') == user_id and session.get('is_active', False):
+                    user_session = session
+                    break
+            
+            if user_session:
                 action_msg = ChatMessage(
                     message_id=str(uuid.uuid4()),
                     user_id=user_id,
-                    companion_id=session.get('companion_id', 'unknown'),
+                    companion_id=user_session.get('companion_id', 'unknown'),
                     content=action_message,
                     message_type=MessageType.ACTION,
                     timestamp=datetime.now(),
                     status=MessageStatus.COMPLETED
                 )
-                session['messages'].append(action_msg)
+                user_session['messages'].append(action_msg)
                 
                 # Send to WebSocket if available
                 if user_id in self.websocket_sessions:
