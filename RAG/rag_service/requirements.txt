@@ -1,14 +1,32 @@
-fastapi>=0.104.1
-uvicorn>=0.24.0
-psycopg[binary]>=3.1.12
-pgvector>=0.2.4
-openai>=1.3.9
-httpx>=0.25.2
-tiktoken>=0.5.1
-python-dotenv>=1.0.0
-pydantic>=2.5.0
-numpy>=1.24.3
+# Core dependencies for the RAG Companion Communication System
+websockets>=11.0.3
+Pillow>=10.0.0
 requests>=2.31.0
-websockets>=12.0
-python-multipart>=0.0.20
-pydub>=0.25.1
+asyncio-mqtt>=0.16.1
+
+# OpenAI integration (optional)
+openai>=1.0.0
+
+# Audio processing (optional)
+pyttsx3>=2.90
+SpeechRecognition>=3.10.0
+pyaudio>=0.2.11
+
+# Image processing enhancements
+opencv-python>=4.8.0
+numpy>=1.24.0
+
+# WebSocket enhancements
+websocket-client>=1.6.0
+
+# Logging and monitoring
+structlog>=23.1.0
+
+# Testing
+pytest>=7.4.0
+pytest-asyncio>=0.21.0
+
+# Development tools
+black>=23.0.0
+flake8>=6.0.0
+mypy>=1.5.0
