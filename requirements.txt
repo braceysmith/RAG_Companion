@@ -1,0 +1,44 @@
+# Core dependencies for the RAG Companion Communication System
+websockets>=11.0.3
+Pillow>=10.0.0
+requests>=2.31.0
+asyncio-mqtt>=0.16.1
+
+# OpenAI integration (optional)
+openai>=1.0.0
+
+# Audio processing alternatives (choose one based on your system)
+# Option 1: PyAudio (requires system dependencies)
+# pyaudio>=0.2.11
+
+# Option 2: Alternative audio libraries (easier installation)
+sounddevice>=0.4.6
+SpeechRecognition>=3.10.0
+
+# Text-to-speech alternatives
+pyttsx3>=2.90
+# Alternative: gTTS (Google Text-to-Speech)
+gtts>=2.3.2
+
+# Image processing enhancements
+opencv-python>=4.8.0
+numpy>=1.24.0
+
+# WebSocket enhancements
+websocket-client>=1.6.0
+
+# Logging and monitoring
+structlog>=23.1.0
+
+# Testing
+pytest>=7.4.0
+pytest-asyncio>=0.21.0
+
+# Development tools
+black>=23.0.0
+flake8>=6.0.0
+mypy>=1.5.0
+
+# Additional utilities
+python-dotenv>=1.0.0
+colorama>=0.4.6
