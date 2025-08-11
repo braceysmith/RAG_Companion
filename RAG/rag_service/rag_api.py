@@ -3,9 +3,10 @@ import uuid
 import asyncio
 from typing import List, Optional, Dict, Any
 from pathlib import Path
+from datetime import datetime
 
 from fastapi import FastAPI, HTTPException, BackgroundTasks, WebSocket, WebSocketDisconnect, UploadFile, File
-from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware_cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -867,7 +868,7 @@ def get_pending_reminders(user_id: str) -> list:
     return pending_reminders
 
 def store_conversation_turn(user_id: str, user_message: str, ai_response: str):
-    """Store conversation turn for context"""
+    """Store conversation turn for context (memory only)"""
     import time
     if user_id not in user_conversations:
         user_conversations[user_id] = []
@@ -882,6 +883,27 @@ def store_conversation_turn(user_id: str, user_message: str, ai_response: str):
     # Keep only last 5 conversation turns
     if len(user_conversations[user_id]) > 5:
         user_conversations[user_id] = user_conversations[user_id][-5:]
+
+async def store_conversation_turn_db(user_id: str, user_message: str, ai_response: str):
+    """Store conversation turn in database for admin tracking"""
+    try:
+        if not database_available:
+            return
+            
+        async with await psycopg.AsyncConnection.connect(database_url) as conn:
+            async with conn.cursor() as cur:
+                # Insert conversation turn
+                await cur.execute("""
+                    INSERT INTO conversation_turns (user_id, user_message, assistant_response, created_at)
+                    VALUES (%s, %s, %s, NOW())
+                """, (user_id, user_message, ai_response))
+                
+                await conn.commit()
+                print(f"✅ Stored conversation turn in database for user {user_id}")
+                
+    except Exception as e:
+        print(f"❌ Failed to store conversation turn in database: {e}")
+        # Don't fail the main flow if database storage fails
 
 def get_conversation_context(user_id: str) -> str:
     """Get recent conversation context"""
@@ -1171,6 +1193,61 @@ async def rag_query_sync(request: dict):
         user_id = request.get('user_id', 'anonymous')
         top_k = request.get('top_k', 5)
         
+        # Check account usage and limits before processing
+        try:
+            async with await psycopg.AsyncConnection.connect(database_url) as conn:
+                async with conn.cursor() as cur:
+                    await cur.execute("""
+                        SELECT account_type, prompts_used, max_prompts, energy_tokens
+                        FROM user_accounts 
+                        WHERE user_id = %s AND status = 'active'
+                    """, (user_id,))
+                    
+                    row = await cur.fetchone()
+                    if row:
+                        account_type, prompts_used, max_prompts, energy_tokens = row
+                        
+                        # Check limits
+                        if account_type == "limited_guest" and prompts_used >= max_prompts:
+                            raise HTTPException(
+                                status_code=429, 
+                                detail=f"Limited guest limit reached ({prompts_used}/{max_prompts}). Contact admin for upgrade."
+                            )
+                        elif account_type == "user" and energy_tokens <= 0:
+                            raise HTTPException(
+                                status_code=429, 
+                                detail="No energy tokens remaining. Purchase more tokens to continue."
+                            )
+                        
+                        # Increment prompt count for limited guests
+                        if account_type == "limited_guest":
+                            await cur.execute("""
+                                UPDATE user_accounts 
+                                SET prompts_used = prompts_used + 1, last_active = NOW()
+                                WHERE user_id = %s
+                            """, (user_id,))
+                        elif account_type == "user":
+                            # Deduct energy token
+                            await cur.execute("""
+                                UPDATE user_accounts 
+                                SET energy_tokens = energy_tokens - 1, last_active = NOW()
+                                WHERE user_id = %s
+                            """, (user_id,))
+                        
+                        await conn.commit()
+                    else:
+                        # Create new limited guest account
+                        await cur.execute("""
+                            INSERT INTO user_accounts (user_id, account_type, username, email, max_prompts, energy_tokens, prompts_used, created_at, status)
+                            VALUES (%s, 'limited_guest', %s, %s, 20, 0, 1, NOW(), 'active')
+                        """, (user_id, f"User_{user_id}", f"{user_id}@ragcompanion.com"))
+                        await conn.commit()
+                        
+        except Exception as limit_error:
+            if "429" in str(limit_error):
+                raise limit_error
+            print(f"Warning: Could not check account limits: {limit_error}")
+        
         # Load user profile from database if needed
         await load_user_profile_if_needed(user_id)
         
@@ -1198,11 +1275,17 @@ async def rag_query_sync(request: dict):
             if other_info:
                 await store_personal_info_simple(user_id, other_info)
         
-        # Store user message for future memory/context (disabled for now to prevent errors)
-        # try:
-        #     asyncio.run(store_user_interaction(user_id, query_text, "user"))
-        # except Exception as store_error:
-        #     print(f"Warning: Could not store user interaction: {store_error}")
+        # Store user message for future memory/context (only for accounts that support it)
+        try:
+            # Check if account supports memory storage
+            async with await psycopg.AsyncConnection.connect(database_url) as conn:
+                async with conn.cursor() as cur:
+                    await cur.execute("SELECT account_type FROM user_accounts WHERE user_id = %s", (user_id,))
+                    row = await cur.fetchone()
+                    if row and row[0] in ["admin", "user"]:
+                        await store_user_interaction(user_id, query_text, "user")
+        except Exception as store_error:
+            print(f"Warning: Could not store user interaction: {store_error}")
         
         # Get query embedding
         embedding_start = time.time()
@@ -1261,6 +1344,24 @@ async def rag_query_sync(request: dict):
             
             # Generate conversational response (RAG or personal AI response)
             print(f"🔍 /query endpoint: results={len(results)}, not results={not results}")
+            
+            # Store the conversation turn for tracking (only for accounts that support it)
+            try:
+                if results:
+                    # Store the AI response as well
+                    ai_response = results[0].get("text", "No response generated")
+                    # Store in memory for context (always)
+                    store_conversation_turn(user_id, query_text, ai_response)
+                    
+                    # Store in database for admin tracking (only for accounts that support it)
+                    async with await psycopg.AsyncConnection.connect(database_url) as conn:
+                        async with conn.cursor() as cur:
+                            await cur.execute("SELECT account_type FROM user_accounts WHERE user_id = %s", (user_id,))
+                            row = await cur.fetchone()
+                            if row and row[0] in ["admin", "user"]:
+                                await store_conversation_turn_db(user_id, query_text, ai_response)
+            except Exception as conv_error:
+                print(f"Warning: Could not store conversation turn: {conv_error}")
             if not results:
                 print(f"🔍 Calling generate_conversational_response for user_id: {user_id}")
                 # Generate fluid conversational response with tool support
@@ -1923,6 +2024,38 @@ Keep it conversational and personal. Don't mention "delivering reminders" - just
         print(f"Reminder delivery error: {e}")
         return {"status": "error", "message": f"Failed to deliver reminders: {str(e)}"}
 
+# Account Types and Permissions
+ACCOUNT_TYPES = {
+    "admin": {
+        "name": "Administrator",
+        "max_prompts": -1,  # Unlimited
+        "memory_storage": True,
+        "admin_access": True,
+        "description": "Full system access with unlimited prompts and memory storage"
+    },
+    "limited_guest": {
+        "name": "Limited Guest",
+        "max_prompts": 20,
+        "memory_storage": False,
+        "admin_access": False,
+        "description": "Limited to 20 prompts with no memory storage"
+    },
+    "unlimited_guest": {
+        "name": "Unlimited Guest",
+        "max_prompts": -1,  # Unlimited
+        "memory_storage": False,
+        "admin_access": False,
+        "description": "Unlimited prompts with no memory storage"
+    },
+    "user": {
+        "name": "User",
+        "max_prompts": -1,  # Based on energy tokens
+        "memory_storage": True,
+        "admin_access": False,
+        "description": "Prompts based on energy tokens with full memory storage"
+    }
+}
+
 # Admin Management Models
 class AdminUser(BaseModel):
     user_id: str
@@ -1931,7 +2064,10 @@ class AdminUser(BaseModel):
     created_at: Optional[str] = None
     last_active: Optional[str] = None
     status: str = "active"  # active, suspended, deleted
-    permissions: List[str] = ["user"]  # user, admin, moderator
+    account_type: str = "user"  # admin, limited_guest, unlimited_guest, user
+    prompts_used: int = 0
+    max_prompts: int = -1  # -1 means unlimited
+    energy_tokens: int = 100  # For user accounts
     memory_count: int = 0
     conversation_count: int = 0
 
@@ -1939,7 +2075,9 @@ class AdminUserUpdate(BaseModel):
     username: Optional[str] = None
     email: Optional[str] = None
     status: Optional[str] = None
-    permissions: Optional[List[str]] = None
+    account_type: Optional[str] = None
+    max_prompts: Optional[int] = None
+    energy_tokens: Optional[int] = None
 
 class SystemStats(BaseModel):
     total_users: int
@@ -1958,10 +2096,85 @@ class UserAuthRequest(BaseModel):
     user_id: str
     auth_token: Optional[str] = None  # For future authentication system
 
+class CreateAccountRequest(BaseModel):
+    user_id: str
+    account_type: str  # admin, limited_guest, unlimited_guest, user
+    username: Optional[str] = None
+    email: Optional[str] = None
+    initial_energy_tokens: Optional[int] = 100  # For user accounts
+
+class AccountUsageResponse(BaseModel):
+    user_id: str
+    account_type: str
+    prompts_used: int
+    max_prompts: int
+    energy_tokens: int
+    can_make_request: bool
+    reason: Optional[str] = None
+
 # Admin Management Endpoints
+@app.post("/admin/accounts/create", response_model=AdminUser)
+async def create_account(request: CreateAccountRequest):
+    """Create a new account with specified type and limits"""
+    try:
+        if not database_available:
+            raise HTTPException(status_code=503, detail="Database not available")
+        
+        # Validate account type
+        if request.account_type not in ACCOUNT_TYPES:
+            raise HTTPException(status_code=400, detail=f"Invalid account type. Must be one of: {list(ACCOUNT_TYPES.keys())}")
+        
+        # Get account configuration
+        account_config = ACCOUNT_TYPES[request.account_type]
+        
+        # Create user in database
+        try:
+            async with await psycopg.AsyncConnection.connect(database_url) as conn:
+                async with conn.cursor() as cur:
+                    # Check if user already exists
+                    await cur.execute("SELECT user_id FROM user_accounts WHERE user_id = %s", (request.user_id,))
+                    if await cur.fetchone():
+                        raise HTTPException(status_code=400, detail="User already exists")
+                    
+                    # Insert new user account
+                    await cur.execute("""
+                        INSERT INTO user_accounts (user_id, account_type, username, email, max_prompts, energy_tokens, prompts_used, created_at, status)
+                        VALUES (%s, %s, %s, %s, %s, %s, 0, NOW(), 'active')
+                    """, (
+                        request.user_id,
+                        request.account_type,
+                        request.username or f"User_{request.user_id}",
+                        request.email or f"{request.user_id}@ragcompanion.com",
+                        account_config["max_prompts"],
+                        request.initial_energy_tokens if request.account_type == "user" else 0
+                    ))
+                    
+                    await conn.commit()
+                    
+                    return AdminUser(
+                        user_id=request.user_id,
+                        username=request.username or f"User_{request.user_id}",
+                        email=request.email or f"{request.user_id}@ragcompanion.com",
+                        created_at=datetime.now().isoformat(),
+                        last_active=datetime.now().isoformat(),
+                        status="active",
+                        account_type=request.account_type,
+                        prompts_used=0,
+                        max_prompts=account_config["max_prompts"],
+                        energy_tokens=request.initial_energy_tokens if request.account_type == "user" else 0,
+                        memory_count=0,
+                        conversation_count=0
+                    )
+                    
+        except Exception as db_error:
+            raise HTTPException(status_code=500, detail=f"Database error: {str(db_error)}")
+            
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to create account: {str(e)}")
+
 @app.get("/admin/users", response_model=List[AdminUser])
 async def get_all_users():
-    """Get all users in the system with their data counts"""
+    """Get all users in the system with their data counts and account types"""
     try:
         if not database_available:
             raise HTTPException(status_code=503, detail="Database not available")
@@ -1976,38 +2189,51 @@ async def get_all_users():
             created_at="2024-01-01T00:00:00Z",
             last_active="2024-01-01T00:00:00Z",
             status="active",
-            permissions=["admin"],
+            account_type="admin",
+            prompts_used=0,
+            max_prompts=-1,
+            energy_tokens=999999,
             memory_count=0,
             conversation_count=0
         ))
         
-        # Get actual users from database with their data counts
+        # Get actual users from database with their data counts and account info
         try:
             async with await psycopg.AsyncConnection.connect(database_url) as conn:
                 async with conn.cursor() as cur:
-                    # Get users with their memory and conversation counts
+                    # Get users with their memory, conversation counts, and account info
                     await cur.execute("""
                         SELECT 
-                            um.user_id,
-                            MAX(um.created_at) as created_at,
-                            MAX(um.updated_at) as last_active,
+                            ua.user_id,
+                            ua.username,
+                            ua.email,
+                            ua.account_type,
+                            ua.prompts_used,
+                            ua.max_prompts,
+                            ua.energy_tokens,
+                            ua.created_at,
+                            ua.last_active,
                             COUNT(DISTINCT um.id) as memory_count,
                             COUNT(DISTINCT ct.id) as conversation_count
-                        FROM user_memory um
-                        LEFT JOIN conversation_turns ct ON um.user_id = ct.user_id
-                        GROUP BY um.user_id
+                        FROM user_accounts ua
+                        LEFT JOIN user_memory um ON ua.user_id = um.user_id
+                        LEFT JOIN conversation_turns ct ON ua.user_id = ct.user_id
+                        GROUP BY ua.user_id, ua.username, ua.email, ua.account_type, ua.prompts_used, ua.max_prompts, ua.energy_tokens, ua.created_at, ua.last_active
                     """)
                     
                     async for row in cur:
-                        user_id, created_at, last_active, memory_count, conversation_count = row
+                        user_id, username, email, account_type, prompts_used, max_prompts, energy_tokens, created_at, last_active, memory_count, conversation_count = row
                         users.append(AdminUser(
                             user_id=user_id,
-                            username=f"User_{user_id}",
-                            email=f"{user_id}@ragcompanion.com",
+                            username=username or f"User_{user_id}",
+                            email=email or f"{user_id}@ragcompanion.com",
                             created_at=created_at.isoformat() if created_at else "2024-01-01T00:00:00Z",
                             last_active=last_active.isoformat() if last_active else "2024-01-01T00:00:00Z",
                             status="active",
-                            permissions=["user"],
+                            account_type=account_type,
+                            prompts_used=prompts_used or 0,
+                            max_prompts=max_prompts or -1,
+                            energy_tokens=energy_tokens or 0,
                             memory_count=memory_count or 0,
                             conversation_count=conversation_count or 0
                         ))
@@ -2319,6 +2545,67 @@ async def get_companion_profile(user_id: str):
             
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to get companion profile: {str(e)}")
+
+@app.get("/account/usage/{user_id}", response_model=AccountUsageResponse)
+async def check_account_usage(user_id: str):
+    """Check if a user can make a request based on their account type and limits"""
+    try:
+        if not database_available:
+            raise HTTPException(status_code=503, detail="Database not available")
+        
+        # Check user account in database
+        try:
+            async with await psycopg.AsyncConnection.connect(database_url) as conn:
+                async with conn.cursor() as cur:
+                    await cur.execute("""
+                        SELECT account_type, prompts_used, max_prompts, energy_tokens
+                        FROM user_accounts 
+                        WHERE user_id = %s AND status = 'active'
+                    """, (user_id,))
+                    
+                    row = await cur.fetchone()
+                    if not row:
+                        # User doesn't exist - create as limited guest
+                        return AccountUsageResponse(
+                            user_id=user_id,
+                            account_type="limited_guest",
+                            prompts_used=0,
+                            max_prompts=20,
+                            energy_tokens=0,
+                            can_make_request=True,
+                            reason="New user - limited guest access"
+                        )
+                    
+                    account_type, prompts_used, max_prompts, energy_tokens = row
+                    
+                    # Check if user can make request
+                    can_make_request = True
+                    reason = None
+                    
+                    if account_type == "limited_guest":
+                        if prompts_used >= max_prompts:
+                            can_make_request = False
+                            reason = f"Limited guest limit reached ({prompts_used}/{max_prompts})"
+                    elif account_type == "user":
+                        if energy_tokens <= 0:
+                            can_make_request = False
+                            reason = "No energy tokens remaining"
+                    
+                    return AccountUsageResponse(
+                        user_id=user_id,
+                        account_type=account_type,
+                        prompts_used=prompts_used,
+                        max_prompts=max_prompts,
+                        energy_tokens=energy_tokens,
+                        can_make_request=can_make_request,
+                        reason=reason
+                    )
+                    
+        except Exception as db_error:
+            raise HTTPException(status_code=500, detail=f"Database error: {str(db_error)}")
+            
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to check account usage: {str(e)}")
 
 if __name__ == "__main__":
     import uvicorn
