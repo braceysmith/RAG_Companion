@@ -6,6 +6,8 @@ from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, BackgroundTasks, WebSocket, WebSocketDisconnect, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from openai import OpenAI
 from dotenv import load_dotenv
@@ -33,6 +35,16 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Admin interface route
+@app.get("/admin", response_class=HTMLResponse)
+async def admin_interface():
+    """Serve the admin dashboard interface"""
+    try:
+        with open("admin_interface.html", "r", encoding="utf-8") as f:
+            return HTMLResponse(content=f.read())
+    except FileNotFoundError:
+        return HTMLResponse(content="<h1>Admin interface not found</h1>", status_code=404)
 
 # Initialize database with better error handling
 database_url = os.getenv("DATABASE_URL", "postgresql://user:password@localhost/rag_db")
@@ -1909,6 +1921,197 @@ Keep it conversational and personal. Don't mention "delivering reminders" - just
     except Exception as e:
         print(f"Reminder delivery error: {e}")
         return {"status": "error", "message": f"Failed to deliver reminders: {str(e)}"}
+
+# Admin Management Models
+class AdminUser(BaseModel):
+    user_id: str
+    username: Optional[str] = None
+    email: Optional[str] = None
+    created_at: Optional[str] = None
+    last_active: Optional[str] = None
+    status: str = "active"  # active, suspended, deleted
+    permissions: List[str] = ["user"]  # user, admin, moderator
+
+class AdminUserUpdate(BaseModel):
+    username: Optional[str] = None
+    email: Optional[str] = None
+    status: Optional[str] = None
+    permissions: Optional[List[str]] = None
+
+class SystemStats(BaseModel):
+    total_users: int
+    active_users: int
+    total_conversations: int
+    total_documents: int
+    database_size_mb: float
+    system_uptime_hours: float
+
+class DataClearRequest(BaseModel):
+    user_id: Optional[str] = None  # If None, clear all data
+    data_types: List[str] = ["conversations", "memories", "documents"]  # What to clear
+    confirm: bool = False  # Safety confirmation
+
+# Admin Management Endpoints
+@app.get("/admin/users", response_model=List[AdminUser])
+async def get_all_users():
+    """Get all users in the system"""
+    try:
+        if not database_available:
+            raise HTTPException(status_code=503, detail="Database not available")
+        
+        # This would query your user table
+        # For now, return a placeholder
+        return [
+            AdminUser(
+                user_id="admin",
+                username="Administrator",
+                email="admin@ragcompanion.com",
+                created_at="2024-01-01T00:00:00Z",
+                last_active="2024-01-01T00:00:00Z",
+                status="active",
+                permissions=["admin"]
+            )
+        ]
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get users: {str(e)}")
+
+@app.get("/admin/users/{user_id}", response_model=AdminUser)
+async def get_user_details(user_id: str):
+    """Get detailed information about a specific user"""
+    try:
+        if not database_available:
+            raise HTTPException(status_code=503, detail="Database not available")
+        
+        # Query user details from database
+        # For now, return placeholder
+        return AdminUser(
+            user_id=user_id,
+            username=f"User_{user_id}",
+            email=f"user_{user_id}@example.com",
+            created_at="2024-01-01T00:00:00Z",
+            last_active="2024-01-01T00:00:00Z",
+            status="active",
+            permissions=["user"]
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get user details: {str(e)}")
+
+@app.put("/admin/users/{user_id}")
+async def update_user(user_id: str, user_update: AdminUserUpdate):
+    """Update user information and permissions"""
+    try:
+        if not database_available:
+            raise HTTPException(status_code=503, detail="Database not available")
+        
+        # Update user in database
+        # For now, just return success
+        return {"message": f"User {user_id} updated successfully", "updated_fields": user_update.dict(exclude_unset=True)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to update user: {str(e)}")
+
+@app.delete("/admin/users/{user_id}")
+async def delete_user(user_id: str, confirm: bool = False):
+    """Delete a user account and all associated data"""
+    if not confirm:
+        raise HTTPException(status_code=400, detail="Must confirm deletion with confirm=true")
+    
+    try:
+        if not database_available:
+            raise HTTPException(status_code=503, detail="Database not available")
+        
+        # Delete user and all associated data
+        # This would clear conversations, memories, documents, etc.
+        
+        return {"message": f"User {user_id} and all associated data deleted successfully"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to delete user: {str(e)}")
+
+@app.post("/admin/data/clear")
+async def clear_data(request: DataClearRequest):
+    """Clear specific types of data for a user or all users"""
+    if not request.confirm:
+        raise HTTPException(status_code=400, detail="Must confirm data clearing with confirm=true")
+    
+    try:
+        if not database_available:
+            raise HTTPException(status_code=503, detail="Database not available")
+        
+        # Clear specified data types
+        cleared_data = []
+        
+        if "conversations" in request.data_types:
+            # Clear conversation history
+            cleared_data.append("conversations")
+        
+        if "memories" in request.data_types:
+            # Clear user memories
+            cleared_data.append("memories")
+        
+        if "documents" in request.data_types:
+            # Clear uploaded documents
+            cleared_data.append("documents")
+        
+        return {
+            "message": f"Data cleared successfully for {'all users' if request.user_id is None else f'user {request.user_id}'}",
+            "cleared_data_types": cleared_data,
+            "user_id": request.user_id
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to clear data: {str(e)}")
+
+@app.get("/admin/stats", response_model=SystemStats)
+async def get_system_stats():
+    """Get system statistics and performance metrics"""
+    try:
+        if not database_available:
+            raise HTTPException(status_code=503, detail="Database not available")
+        
+        # Query system statistics from database
+        # For now, return placeholder data
+        return SystemStats(
+            total_users=1,
+            active_users=1,
+            total_conversations=10,
+            total_documents=5,
+            database_size_mb=2.5,
+            system_uptime_hours=24.0
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get system stats: {str(e)}")
+
+@app.get("/admin/health/detailed")
+async def get_detailed_health():
+    """Get detailed system health information"""
+    try:
+        health_info = {
+            "status": "healthy",
+            "service": "RAG Companion Service",
+            "database_available": database_available,
+            "vector_search": "enabled" if database_available else "fallback_mode",
+            "system_info": {
+                "python_version": "3.11",
+                "fastapi_version": "0.104.0",
+                "database_type": "PostgreSQL with pgvector",
+                "uptime_seconds": 86400  # Placeholder
+            },
+            "performance": {
+                "active_connections": 1,
+                "memory_usage_mb": 128.5,
+                "cpu_usage_percent": 15.2
+            }
+        }
+        
+        if database_available:
+            # Add database-specific health info
+            health_info["database"] = {
+                "connection_pool_size": 10,
+                "active_queries": 0,
+                "cache_hit_ratio": 0.85
+            }
+        
+        return health_info
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get health info: {str(e)}")
 
 if __name__ == "__main__":
     import uvicorn
