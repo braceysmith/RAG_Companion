@@ -4,7 +4,7 @@ import psycopg
 from psycopg import sql
 from typing import List, Dict, Any
 import numpy as np
-from pgvector.psycopg import register_vector
+# Note: register_vector is not needed for async connections in newer versions
 
 class RAGDatabase:
     def __init__(self, db_url: str):
@@ -14,7 +14,7 @@ class RAGDatabase:
         """Initialize database with required tables and extensions"""
         async with await psycopg.AsyncConnection.connect(self.db_url) as conn:
             await conn.execute("SELECT 1")  # Ensure connection is ready
-            register_vector(conn)
+            # Note: register_vector is not needed for async connections in newer versions
             async with conn.cursor() as cur:
                 # Create extension
                 await cur.execute("CREATE EXTENSION IF NOT EXISTS vector")
@@ -98,7 +98,7 @@ class RAGDatabase:
         """Insert or update chunks in the database"""
         async with await psycopg.AsyncConnection.connect(self.db_url) as conn:
             await conn.execute("SELECT 1")  # Ensure connection is ready
-            register_vector(conn)
+            # Note: register_vector is not needed for async connections
             async with conn.cursor() as cur:
                 for chunk in chunks:
                     await cur.execute("""
@@ -127,7 +127,7 @@ class RAGDatabase:
         """Search for similar chunks using vector similarity"""
         async with await psycopg.AsyncConnection.connect(self.db_url) as conn:
             await conn.execute("SELECT 1")  # Ensure connection is ready
-            register_vector(conn)
+            # Note: register_vector is not needed for async connections
             async with conn.cursor() as cur:
                 # Build WHERE clause
                 where_conditions = []
@@ -173,7 +173,7 @@ class RAGDatabase:
         """Insert or update user memory"""
         async with await psycopg.AsyncConnection.connect(self.db_url) as conn:
             await conn.execute("SELECT 1")  # Ensure connection is ready
-            register_vector(conn)
+            # Note: register_vector is not needed for async connections
             async with conn.cursor() as cur:
                 memory_id = f"{user_id}_{memory_type}_{hash(content)}"
                 await cur.execute("""
@@ -201,7 +201,7 @@ class RAGDatabase:
         """Search user memory using vector similarity"""
         async with await psycopg.AsyncConnection.connect(self.db_url) as conn:
             await conn.execute("SELECT 1")  # Ensure connection is ready
-            register_vector(conn)
+            # Note: register_vector is not needed for async connections
             async with conn.cursor() as cur:
                 where_conditions = ["user_id = %(user_id)s"]
                 params = {"user_id": user_id, "embedding": query_embedding, "top_k": top_k}
@@ -267,7 +267,7 @@ class RAGDatabase:
         import time
         try:
             async with await psycopg.AsyncConnection.connect(self.db_url) as conn:
-                register_vector(conn)
+                # Note: register_vector is not needed for async connections
                 async with conn.cursor() as cur:
                     memory_id = f"profile_{user_id}_{int(time.time())}"
                     
@@ -296,7 +296,7 @@ class RAGDatabase:
         """Retrieve user profile information from database"""
         try:
             async with await psycopg.AsyncConnection.connect(self.db_url) as conn:
-                register_vector(conn)
+                # Note: register_vector is not needed for async connections
                 async with conn.cursor() as cur:
                     await cur.execute("""
                         SELECT metadata FROM user_memory 
