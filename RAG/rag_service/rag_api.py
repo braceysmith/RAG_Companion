@@ -1932,6 +1932,8 @@ class AdminUser(BaseModel):
     last_active: Optional[str] = None
     status: str = "active"  # active, suspended, deleted
     permissions: List[str] = ["user"]  # user, admin, moderator
+    memory_count: int = 0
+    conversation_count: int = 0
 
 class AdminUserUpdate(BaseModel):
     username: Optional[str] = None
@@ -1952,15 +1954,18 @@ class DataClearRequest(BaseModel):
     data_types: List[str] = ["conversations", "memories", "documents"]  # What to clear
     confirm: bool = False  # Safety confirmation
 
+class UserAuthRequest(BaseModel):
+    user_id: str
+    auth_token: Optional[str] = None  # For future authentication system
+
 # Admin Management Endpoints
 @app.get("/admin/users", response_model=List[AdminUser])
 async def get_all_users():
-    """Get all users in the system"""
+    """Get all users in the system with their data counts"""
     try:
         if not database_available:
             raise HTTPException(status_code=503, detail="Database not available")
         
-        # Use the existing database instance
         users = []
         
         # Add admin user
@@ -1971,16 +1976,46 @@ async def get_all_users():
             created_at="2024-01-01T00:00:00Z",
             last_active="2024-01-01T00:00:00Z",
             status="active",
-            permissions=["admin"]
+            permissions=["admin"],
+            memory_count=0,
+            conversation_count=0
         ))
         
-        # Try to get actual users from database
+        # Get actual users from database with their data counts
         try:
-            # For now, return just admin until we figure out the table structure
-            return users
+            async with await psycopg.AsyncConnection.connect(database_url) as conn:
+                async with conn.cursor() as cur:
+                    # Get users with their memory and conversation counts
+                    await cur.execute("""
+                        SELECT 
+                            um.user_id,
+                            MAX(um.created_at) as created_at,
+                            MAX(um.updated_at) as last_active,
+                            COUNT(DISTINCT um.id) as memory_count,
+                            COUNT(DISTINCT ct.id) as conversation_count
+                        FROM user_memory um
+                        LEFT JOIN conversation_turns ct ON um.user_id = ct.user_id
+                        GROUP BY um.user_id
+                    """)
+                    
+                    async for row in cur:
+                        user_id, created_at, last_active, memory_count, conversation_count = row
+                        users.append(AdminUser(
+                            user_id=user_id,
+                            username=f"User_{user_id}",
+                            email=f"{user_id}@ragcompanion.com",
+                            created_at=created_at.isoformat() if created_at else "2024-01-01T00:00:00Z",
+                            last_active=last_active.isoformat() if last_active else "2024-01-01T00:00:00Z",
+                            status="active",
+                            permissions=["user"],
+                            memory_count=memory_count or 0,
+                            conversation_count=conversation_count or 0
+                        ))
         except Exception as db_error:
             # If database query fails, return at least admin user
-            return users
+            pass
+            
+        return users
             
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to get users: {str(e)}")
@@ -1992,17 +2027,44 @@ async def get_user_details(user_id: str):
         if not database_available:
             raise HTTPException(status_code=503, detail="Database not available")
         
-        # Query user details from database
-        # For now, return placeholder
-        return AdminUser(
-            user_id=user_id,
-            username=f"User_{user_id}",
-            email=f"user_{user_id}@example.com",
-            created_at="2024-01-01T00:00:00Z",
-            last_active="2024-01-01T00:00:00Z",
-            status="active",
-            permissions=["user"]
-        )
+        # Query actual user details from database
+        try:
+            async with await psycopg.AsyncConnection.connect(database_url) as conn:
+                async with conn.cursor() as cur:
+                    # Get user details with counts
+                    await cur.execute("""
+                        SELECT 
+                            um.user_id,
+                            MAX(um.created_at) as created_at,
+                            MAX(um.updated_at) as last_active,
+                            COUNT(DISTINCT um.id) as memory_count,
+                            COUNT(DISTINCT ct.id) as conversation_count
+                        FROM user_memory um
+                        LEFT JOIN conversation_turns ct ON um.user_id = ct.user_id
+                        WHERE um.user_id = %s
+                        GROUP BY um.user_id
+                    """, (user_id,))
+                    
+                    row = await cur.fetchone()
+                    if row:
+                        user_id, created_at, last_active, memory_count, conversation_count = row
+                        return AdminUser(
+                            user_id=user_id,
+                            username=f"User_{user_id}",
+                            email=f"{user_id}@ragcompanion.com",
+                            created_at=created_at.isoformat() if created_at else "2024-01-01T00:00:00Z",
+                            last_active=last_active.isoformat() if last_active else "2024-01-01T00:00:00Z",
+                            status="active",
+                            permissions=["user"],
+                            memory_count=memory_count or 0,
+                            conversation_count=conversation_count or 0
+                        )
+                    else:
+                        raise HTTPException(status_code=404, detail="User not found")
+                        
+        except Exception as db_error:
+            raise HTTPException(status_code=500, detail=f"Database error: {str(db_error)}")
+            
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to get user details: {str(e)}")
 
@@ -2076,15 +2138,44 @@ async def get_system_stats():
         if not database_available:
             raise HTTPException(status_code=503, detail="Database not available")
         
-        # For now, return basic stats until we figure out the table structure
-        return SystemStats(
-            total_users=1,  # Just admin for now
-            active_users=1,
-            total_conversations=0,
-            total_documents=0,
-            database_size_mb=5.0,
-            system_uptime_hours=24.0
-        )
+        # Get actual stats from database using correct table names
+        try:
+            async with await psycopg.AsyncConnection.connect(database_url) as conn:
+                async with conn.cursor() as cur:
+                    # Get user count from user_memory table
+                    await cur.execute("SELECT COUNT(DISTINCT user_id) FROM user_memory")
+                    user_count = await cur.fetchone()
+                    total_users = user_count[0] if user_count else 0
+                    
+                    # Get conversation count from conversation_turns table
+                    await cur.execute("SELECT COUNT(*) FROM conversation_turns")
+                    conv_count = await cur.fetchone()
+                    total_conversations = conv_count[0] if conv_count else 0
+                    
+                    # Get document count from rag_chunks table
+                    await cur.execute("SELECT COUNT(*) FROM rag_chunks")
+                    doc_count = await cur.fetchone()
+                    total_documents = doc_count[0] if doc_count else 0
+                    
+                    return SystemStats(
+                        total_users=total_users + 1,  # +1 for admin
+                        active_users=total_users + 1,
+                        total_conversations=total_conversations,
+                        total_documents=total_documents,
+                        database_size_mb=5.0,  # Placeholder
+                        system_uptime_hours=24.0  # Placeholder
+                    )
+        except Exception as db_error:
+            # If database query fails, return basic stats
+            return SystemStats(
+                total_users=1,  # Just admin
+                active_users=1,
+                total_conversations=0,
+                total_documents=0,
+                database_size_mb=5.0,
+                system_uptime_hours=24.0
+            )
+            
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to get system stats: {str(e)}")
 
@@ -2140,31 +2231,94 @@ async def debug_database():
                 """)
                 tables = [row[0] async for row in cur]
                 
-                # Get user_memories table structure if it exists
-                user_memories_structure = []
-                if 'user_memories' in tables:
+                # Get user_memory table structure if it exists
+                user_memory_structure = []
+                if 'user_memory' in tables:
                     await cur.execute("""
                         SELECT column_name, data_type, is_nullable
                         FROM information_schema.columns
-                        WHERE table_name = 'user_memories'
+                        WHERE table_name = 'user_memory'
                         ORDER BY ordinal_position
                     """)
-                    user_memories_structure = [{"column": row[0], "type": row[1], "nullable": row[2]} async for row in cur]
+                    user_memory_structure = [{"column": row[0], "type": row[1], "nullable": row[2]} async for row in cur]
                 
-                # Get sample data from user_memories if it exists
+                # Get sample data from user_memory if it exists
                 sample_data = []
-                if 'user_memories' in tables:
-                    await cur.execute("SELECT * FROM user_memories LIMIT 5")
+                if 'user_memory' in tables:
+                    await cur.execute("SELECT * FROM user_memory LIMIT 5")
                     sample_data = [{"row": row} async for row in cur]
                 
                 return {
                     "tables": tables,
-                    "user_memories_structure": user_memories_structure,
+                    "user_memory_structure": user_memory_structure,
                     "sample_data": sample_data,
                     "database_url": database_url.replace(database_url.split('@')[0].split(':')[-1], '***') if '@' in database_url else "hidden"
                 }
     except Exception as e:
         return {"error": str(e), "traceback": str(e.__traceback__)}
+
+@app.get("/companion/{user_id}/profile")
+async def get_companion_profile(user_id: str):
+    """Get companion profile - only shows data for the specified companion"""
+    try:
+        if not database_available:
+            raise HTTPException(status_code=503, detail="Database not available")
+        
+        # Query companion-specific data from database
+        try:
+            async with await psycopg.AsyncConnection.connect(database_url) as conn:
+                async with conn.cursor() as cur:
+                    # Get companion memories
+                    await cur.execute("""
+                        SELECT memory_type, content, created_at, metadata
+                        FROM user_memory 
+                        WHERE user_id = %s
+                        ORDER BY created_at DESC
+                        LIMIT 50
+                    """, (user_id,))
+                    
+                    memories = []
+                    async for row in cur:
+                        memory_type, content, created_at, metadata = row
+                        memories.append({
+                            "type": memory_type,
+                            "content": content[:200] + "..." if len(content) > 200 else content,  # Truncate long content
+                            "created_at": created_at.isoformat() if created_at else None,
+                            "metadata": metadata
+                        })
+                    
+                    # Get companion conversations
+                    await cur.execute("""
+                        SELECT user_message, assistant_response, created_at
+                        FROM conversation_turns 
+                        WHERE user_id = %s
+                        ORDER BY created_at DESC
+                        LIMIT 20
+                    """, (user_id,))
+                    
+                    conversations = []
+                    async for row in cur:
+                        user_message, assistant_response, created_at = row
+                        conversations.append({
+                            "user_message": user_message[:100] + "..." if len(user_message) > 100 else user_message,
+                            "assistant_response": assistant_response[:100] + "..." if len(assistant_response) > 100 else assistant_response,
+                            "created_at": created_at.isoformat() if created_at else None
+                        })
+                    
+                    return {
+                        "user_id": user_id,
+                        "memories": memories,
+                        "conversations": conversations,
+                        "total_memories": len(memories),
+                        "total_conversations": len(conversations),
+                        "last_active": memories[0]["created_at"] if memories else None
+                    }
+                        
+        except Exception as db_error:
+            raise HTTPException(status_code=500, detail=f"Database error: {str(db_error)}")
+            
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get companion profile: {str(e)}")
 
 if __name__ == "__main__":
     import uvicorn

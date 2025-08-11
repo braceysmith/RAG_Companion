@@ -528,6 +528,8 @@
                                 <th>Email</th>
                                 <th>Status</th>
                                 <th>Permissions</th>
+                                <th>Memories</th>
+                                <th>Conversations</th>
                                 <th>Actions</th>
                             </tr>
                         </thead>
@@ -539,9 +541,12 @@
                                     <td>${user.email || 'N/A'}</td>
                                     <td><span class="status-badge status-${user.status}">${user.status}</span></td>
                                     <td>${user.permissions.join(', ')}</td>
+                                    <td>${user.memory_count || 0}</td>
+                                    <td>${user.conversation_count || 0}</td>
                                     <td>
                                         <button class="btn btn-warning btn-sm" onclick="editUser('${user.user_id}')">✏️ Edit</button>
                                         <button class="btn btn-danger btn-sm" onclick="deleteUser('${user.user_id}')">🗑️ Delete</button>
+                                        <button class="btn btn-info btn-sm" onclick="viewCompanionProfile('${user.user_id}')">👁️ View</button>
                                     </td>
                                 </tr>
                             `).join('')}
@@ -666,6 +671,68 @@
             refreshStats();
             checkHealth();
         });
+
+        // View companion profile
+        async function viewCompanionProfile(userId) {
+            try {
+                const profile = await apiCall(`/companion/${userId}/profile`);
+                
+                // Create a modal to show the profile
+                const modal = document.createElement('div');
+                modal.style.cssText = `
+                    position: fixed;
+                    top: 0;
+                    left: 0;
+                    width: 100%;
+                    height: 100%;
+                    background: rgba(0,0,0,0.8);
+                    z-index: 1000;
+                    display: flex;
+                    justify-content: center;
+                    align-items: center;
+                `;
+                
+                modal.innerHTML = `
+                    <div style="background: white; padding: 30px; border-radius: 15px; max-width: 800px; max-height: 80vh; overflow-y: auto;">
+                        <h2>Companion Profile: ${userId}</h2>
+                        <div style="margin: 20px 0;">
+                            <h3>📊 Summary</h3>
+                            <p><strong>Total Memories:</strong> ${profile.total_memories}</p>
+                            <p><strong>Total Conversations:</strong> ${profile.total_conversations}</p>
+                            <p><strong>Last Active:</strong> ${profile.last_active || 'Never'}</p>
+                        </div>
+                        
+                        <div style="margin: 20px 0;">
+                            <h3>🧠 Recent Memories</h3>
+                            ${profile.memories.map(memory => `
+                                <div style="border: 1px solid #ddd; padding: 10px; margin: 10px 0; border-radius: 5px;">
+                                    <strong>${memory.type}:</strong> ${memory.content}
+                                    <br><small>${memory.created_at}</small>
+                                </div>
+                            `).join('')}
+                        </div>
+                        
+                        <div style="margin: 20px 0;">
+                            <h3>💬 Recent Conversations</h3>
+                            ${profile.conversations.map(conv => `
+                                <div style="border: 1px solid #ddd; padding: 10px; margin: 10px 0; border-radius: 5px;">
+                                    <strong>User:</strong> ${conv.user_message}
+                                    <br><strong>Assistant:</strong> ${conv.assistant_response}
+                                    <br><small>${conv.created_at}</small>
+                                </div>
+                            `).join('')}
+                        </div>
+                        
+                        <button class="btn btn-primary" onclick="this.parentElement.parentElement.remove()">Close</button>
+                    </div>
+                `;
+                
+                document.body.appendChild(modal);
+                
+            } catch (error) {
+                alert(`Failed to load companion profile: ${error.message}`);
+            }
+        }
     </script>
 </body>
 </html>
