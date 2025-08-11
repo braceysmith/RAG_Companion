@@ -99,7 +99,7 @@ public class ServiceResponse
 public class RAGClient : MonoBehaviour
 {
     [Header("Configuration")]
-    [SerializeField] private string baseUrl = "http://localhost:8077";
+    [SerializeField] private string baseUrl = "https://ragcompanion-production-bf25.up.railway.app";
     [SerializeField] private int timeoutSeconds = 30;
     [SerializeField] private bool enableLogging = true;
     

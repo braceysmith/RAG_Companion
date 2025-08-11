@@ -50,7 +50,7 @@ public class MobileVoiceResponse
 public class MobileRAGClient : MonoBehaviour
 {
     [Header("Cloud Configuration")]
-    [SerializeField] private string cloudApiUrl = "https://your-rag-api.com";
+    [SerializeField] private string cloudApiUrl = "https://ragcompanion-production-bf25.up.railway.app";
     [SerializeField] private string apiKey = "";
     [SerializeField] private int requestTimeoutSeconds = 30;
     [SerializeField] private int maxRetryAttempts = 3;

@@ -23,7 +23,7 @@ public class ServerTimeData
 public class TimeSyncManager : MonoBehaviour
 {
     [Header("Time Sync Settings")]
-    [SerializeField] private string ragApiUrl = "https://your-rag-api.up.railway.app";
+    [SerializeField] private string ragApiUrl = "https://ragcompanion-production-bf25.up.railway.app";
     [SerializeField] private bool enableTimeSync = true;
     [SerializeField] private float syncTimeoutSeconds = 10f;
     

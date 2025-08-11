@@ -7,7 +7,7 @@ using UnityEngine;
 public class ManagerSetup : MonoBehaviour
 {
     [Header("Manager Configuration")]
-    [SerializeField] private string ragApiUrl = "https://your-rag-api.up.railway.app";
+    [SerializeField] private string ragApiUrl = "https://ragcompanion-production-bf25.up.railway.app";
     [SerializeField] private string userId = "mobile-user";
     [SerializeField] private bool autoSetupOnStart = true;
     

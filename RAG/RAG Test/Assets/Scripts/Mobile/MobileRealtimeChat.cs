@@ -19,7 +19,7 @@ public class MobileRealtimeChat : MonoBehaviour
     [SerializeField] private string iceServers = "stun:stun.l.google.com:19302,stun:stun1.l.google.com:19302";
     
     [Header("RAG Integration")]
-    [SerializeField] private string ragApiUrl = "https://your-rag-api.up.railway.app";
+    [SerializeField] private string ragApiUrl = "https://ragcompanion-production-bf25.up.railway.app";
     [SerializeField] private string userId = "mobile-user";
     [SerializeField] private bool enableRAGContext = true; // Now enabled for conversation memory
     [SerializeField] private int maxRAGResults = 3;

@@ -20,7 +20,7 @@ public class RAGCompanionSystem : MonoBehaviour
     [SerializeField] private float systemStartupDelay = 2f;
     
     [Header("Service URLs")]
-    [SerializeField] private string ragServiceUrl = "http://localhost:8077";
+    [SerializeField] private string ragServiceUrl = "https://ragcompanion-production-bf25.up.railway.app";
     [SerializeField] private string openAIApiKey = "";
     
     [Header("Audio Settings")]

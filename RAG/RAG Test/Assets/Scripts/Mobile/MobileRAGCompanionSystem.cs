@@ -7,7 +7,7 @@ using UnityEngine;
 public class MobileRAGCompanionSystem : MonoBehaviour
 {
     [Header("Mobile Configuration")]
-    [SerializeField] private string cloudRAGUrl = "https://your-rag-api.com";
+    [SerializeField] private string cloudRAGUrl = "https://ragcompanion-production-bf25.up.railway.app";
     [SerializeField] private string userId = "mobile-user";
     [SerializeField] private bool enableOfflineMode = true;
     [SerializeField] private bool enableAutoSync = true;

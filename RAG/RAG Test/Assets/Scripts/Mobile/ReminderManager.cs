@@ -39,7 +39,7 @@ public class ReminderResponse
 public class ReminderManager : MonoBehaviour
 {
     [Header("Reminder Settings")]
-    [SerializeField] private string ragApiUrl = "https://your-rag-api.up.railway.app";
+    [SerializeField] private string ragApiUrl = "https://ragcompanion-production-bf25.up.railway.app";
     [SerializeField] private string userId = "mobile-user";
     [SerializeField] private float checkInterval = 60f; // Check every minute
     
