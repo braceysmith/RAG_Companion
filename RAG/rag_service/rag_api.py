@@ -1959,19 +1959,43 @@ async def get_all_users():
         if not database_available:
             raise HTTPException(status_code=503, detail="Database not available")
         
-        # This would query your user table
-        # For now, return a placeholder
-        return [
-            AdminUser(
-                user_id="admin",
-                username="Administrator",
-                email="admin@ragcompanion.com",
-                created_at="2024-01-01T00:00:00Z",
-                last_active="2024-01-01T00:00:00Z",
-                status="active",
-                permissions=["admin"]
-            )
-        ]
+        # Query actual users from database
+        async with await psycopg.AsyncConnection.connect(database_url) as conn:
+            async with conn.cursor() as cur:
+                # Get user profiles from memory system
+                await cur.execute("""
+                    SELECT DISTINCT user_id, 
+                           MAX(created_at) as created_at,
+                           MAX(updated_at) as last_active
+                    FROM user_memories 
+                    GROUP BY user_id
+                """)
+                
+                users = []
+                async for row in cur:
+                    user_id, created_at, last_active = row
+                    users.append(AdminUser(
+                        user_id=user_id,
+                        username=f"User_{user_id}",
+                        email=f"{user_id}@ragcompanion.com",
+                        created_at=created_at.isoformat() if created_at else "2024-01-01T00:00:00Z",
+                        last_active=last_active.isoformat() if last_active else "2024-01-01T00:00:00Z",
+                        status="active",
+                        permissions=["user"]
+                    ))
+                
+                # Add admin user
+                users.append(AdminUser(
+                    user_id="admin",
+                    username="Administrator",
+                    email="admin@ragcompanion.com",
+                    created_at="2024-01-01T00:00:00Z",
+                    last_active="2024-01-01T00:00:00Z",
+                    status="active",
+                    permissions=["admin"]
+                ))
+                
+                return users
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to get users: {str(e)}")
 
@@ -2066,16 +2090,32 @@ async def get_system_stats():
         if not database_available:
             raise HTTPException(status_code=503, detail="Database not available")
         
-        # Query system statistics from database
-        # For now, return placeholder data
-        return SystemStats(
-            total_users=1,
-            active_users=1,
-            total_conversations=10,
-            total_documents=5,
-            database_size_mb=2.5,
-            system_uptime_hours=24.0
-        )
+        # Query actual system statistics from database
+        async with await psycopg.AsyncConnection.connect(database_url) as conn:
+            async with conn.cursor() as cur:
+                # Get user count
+                await cur.execute("SELECT COUNT(DISTINCT user_id) FROM user_memories")
+                user_count = await cur.fetchone()
+                total_users = user_count[0] if user_count else 0
+                
+                # Get conversation count (approximate)
+                await cur.execute("SELECT COUNT(*) FROM user_memories WHERE memory_type = 'episodic'")
+                conv_count = await cur.fetchone()
+                total_conversations = conv_count[0] if conv_count else 0
+                
+                # Get document count (approximate)
+                await cur.execute("SELECT COUNT(*) FROM user_memories WHERE memory_type = 'semantic'")
+                doc_count = await cur.fetchone()
+                total_documents = doc_count[0] if doc_count else 0
+                
+                return SystemStats(
+                    total_users=total_users + 1,  # +1 for admin
+                    active_users=total_users + 1,
+                    total_conversations=total_conversations,
+                    total_documents=total_documents,
+                    database_size_mb=5.0,  # Placeholder - would need actual DB size query
+                    system_uptime_hours=24.0  # Placeholder - would need actual uptime tracking
+                )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to get system stats: {str(e)}")
 
