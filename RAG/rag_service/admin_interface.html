@@ -5,6 +5,77 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>RAG Companion Admin Dashboard</title>
     <style>
+        /* Login Screen Styles */
+        .login-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 9999;
+        }
+
+        .login-container {
+            background: white;
+            padding: 40px;
+            border-radius: 15px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+            text-align: center;
+            max-width: 400px;
+            width: 90%;
+        }
+
+        .login-container h1 {
+            color: #2c3e50;
+            margin-bottom: 30px;
+            font-size: 2em;
+        }
+
+        .login-input {
+            width: 100%;
+            padding: 15px;
+            margin: 10px 0;
+            border: 2px solid #e1e8ed;
+            border-radius: 8px;
+            font-size: 16px;
+            box-sizing: border-box;
+        }
+
+        .login-input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .login-btn {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 15px 30px;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            cursor: pointer;
+            width: 100%;
+            margin-top: 20px;
+        }
+
+        .login-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px rgba(0,0,0,0.2);
+        }
+
+        .login-error {
+            color: #e74c3c;
+            margin-top: 15px;
+            display: none;
+        }
+
+        .admin-content {
+            display: none;
+        }
         * {
             margin: 0;
             padding: 0;
@@ -299,11 +370,25 @@
     </style>
 </head>
 <body>
-    <div class="container">
-        <div class="header">
-            <h1>🔧 RAG Companion Admin Dashboard</h1>
-            <p>System Management & User Administration</p>
+    <!-- Login Overlay -->
+    <div class="login-overlay" id="loginOverlay">
+        <div class="login-container">
+            <h1>🔐 Admin Access</h1>
+            <p>Enter password to access the admin dashboard</p>
+            <input type="password" id="passwordInput" class="login-input" placeholder="Enter password" onkeypress="handlePasswordKeypress(event)">
+            <button class="login-btn" onclick="checkPassword()">🔓 Login</button>
+            <div class="login-error" id="loginError">❌ Incorrect password. Please try again.</div>
         </div>
+    </div>
+
+    <!-- Admin Dashboard Content -->
+    <div class="admin-content" id="adminContent">
+        <div class="container">
+            <div class="header">
+                <h1>🔧 RAG Companion Admin Dashboard</h1>
+                <p>System Management & User Administration</p>
+                <button class="btn btn-danger" onclick="logout()" style="float: right; margin-top: -40px;">🚪 Logout</button>
+            </div>
 
         <div class="nav-tabs">
             <button class="nav-tab active" onclick="showTab('overview')">📊 Overview</button>
@@ -915,6 +1000,49 @@
             resultsDiv.scrollTop = resultsDiv.scrollHeight;
         }
 
+        // Authentication Functions
+        function checkPassword() {
+            const password = document.getElementById('passwordInput').value;
+            const correctPassword = '54321'; // Simple password for now
+            
+            if (password === correctPassword) {
+                document.getElementById('loginOverlay').style.display = 'none';
+                document.getElementById('adminContent').style.display = 'block';
+                // Store authentication state
+                sessionStorage.setItem('adminAuthenticated', 'true');
+                // Clear password field
+                document.getElementById('passwordInput').value = '';
+                document.getElementById('loginError').style.display = 'none';
+            } else {
+                document.getElementById('loginError').style.display = 'block';
+                document.getElementById('passwordInput').value = '';
+                document.getElementById('passwordInput').focus();
+            }
+        }
+
+        function handlePasswordKeypress(event) {
+            if (event.key === 'Enter') {
+                checkPassword();
+            }
+        }
+
+        function logout() {
+            document.getElementById('loginOverlay').style.display = 'flex';
+            document.getElementById('adminContent').style.display = 'none';
+            sessionStorage.removeItem('adminAuthenticated');
+        }
+
+        // Check authentication on page load
+        window.onload = function() {
+            if (sessionStorage.getItem('adminAuthenticated') === 'true') {
+                document.getElementById('loginOverlay').style.display = 'none';
+                document.getElementById('adminContent').style.display = 'block';
+            } else {
+                document.getElementById('loginOverlay').style.display = 'flex';
+                document.getElementById('adminContent').style.display = 'none';
+            }
+        };
+
         // View companion profile
         async function viewCompanionProfile(userId) {
             try {
@@ -977,5 +1105,6 @@
             }
         }
     </script>
+        </div> <!-- Close admin-content div -->
 </body>
 </html>
