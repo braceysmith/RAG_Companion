@@ -2213,7 +2213,7 @@ async def get_all_users():
                             ua.energy_tokens,
                             ua.created_at,
                             ua.last_active,
-                            COUNT(DISTINCT um.id) as memory_count,
+                            COUNT(DISTINCT um.memory_id) as memory_count,
                             COUNT(DISTINCT ct.id) as conversation_count
                         FROM user_accounts ua
                         LEFT JOIN user_memory um ON ua.user_id = um.user_id
@@ -2263,7 +2263,7 @@ async def get_user_details(user_id: str):
                             um.user_id,
                             MAX(um.created_at) as created_at,
                             MAX(um.updated_at) as last_active,
-                            COUNT(DISTINCT um.id) as memory_count,
+                            COUNT(DISTINCT um.memory_id) as memory_count,
                             COUNT(DISTINCT ct.id) as conversation_count
                         FROM user_memory um
                         LEFT JOIN conversation_turns ct ON um.user_id = ct.user_id
@@ -2813,7 +2813,7 @@ async def get_test_account_status(user_id: str):
                     
                     # Get memory and conversation counts
                     await cur.execute("""
-                        SELECT COUNT(DISTINCT um.id) as memory_count, COUNT(DISTINCT ct.id) as conversation_count
+                        SELECT COUNT(DISTINCT um.memory_id) as memory_count, COUNT(DISTINCT ct.id) as conversation_count
                         FROM user_accounts ua
                         LEFT JOIN user_memory um ON ua.user_id = um.user_id
                         LEFT JOIN conversation_turns ct ON ua.user_id = ct.user_id
