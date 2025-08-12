@@ -2607,6 +2607,197 @@ async def check_account_usage(user_id: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to check account usage: {str(e)}")
 
+# Test endpoints for Unity user type testing
+@app.post("/test/create-account")
+async def create_test_account(request: CreateAccountRequest):
+    """Create a test account for Unity testing (bypasses admin restrictions)"""
+    try:
+        if not database_available:
+            raise HTTPException(status_code=503, detail="Database not available")
+        
+        # Validate account type
+        if request.account_type not in ACCOUNT_TYPES:
+            raise HTTPException(status_code=400, detail=f"Invalid account type. Must be one of: {list(ACCOUNT_TYPES.keys())}")
+        
+        # Get account configuration
+        account_config = ACCOUNT_TYPES[request.account_type]
+        
+        # Create or update user account
+        try:
+            async with await psycopg.AsyncConnection.connect(database_url) as conn:
+                async with conn.cursor() as cur:
+                    # Check if user already exists
+                    await cur.execute("SELECT user_id FROM user_accounts WHERE user_id = %s", (request.user_id,))
+                    existing_user = await cur.fetchone()
+                    
+                    if existing_user:
+                        # Update existing user
+                        await cur.execute("""
+                            UPDATE user_accounts 
+                            SET account_type = %s, max_prompts = %s, energy_tokens = %s, prompts_used = 0, status = 'active'
+                            WHERE user_id = %s
+                        """, (
+                            request.account_type,
+                            account_config["max_prompts"],
+                            request.initial_energy_tokens if request.account_type == "user" else 0,
+                            request.user_id
+                        ))
+                        action = "updated"
+                    else:
+                        # Insert new user account
+                        await cur.execute("""
+                            INSERT INTO user_accounts (user_id, account_type, username, email, max_prompts, energy_tokens, prompts_used, created_at, status)
+                            VALUES (%s, %s, %s, %s, %s, %s, 0, NOW(), 'active')
+                        """, (
+                            request.user_id,
+                            request.account_type,
+                            request.username or f"Test_{request.user_id}",
+                            request.email or f"{request.user_id}@test.com",
+                            account_config["max_prompts"],
+                            request.initial_energy_tokens if request.account_type == "user" else 0
+                        ))
+                        action = "created"
+                    
+                    await conn.commit()
+                    
+                    return {
+                        "message": f"Test account {action} successfully",
+                        "user_id": request.user_id,
+                        "account_type": request.account_type,
+                        "max_prompts": account_config["max_prompts"],
+                        "energy_tokens": request.initial_energy_tokens if request.account_type == "user" else 0,
+                        "action": action
+                    }
+                    
+        except Exception as db_error:
+            raise HTTPException(status_code=500, detail=f"Database error: {str(db_error)}")
+            
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to create test account: {str(e)}")
+
+@app.post("/test/reset-account/{user_id}")
+async def reset_test_account(user_id: str, account_type: str = "limited_guest"):
+    """Reset a test account to specified type with fresh limits"""
+    try:
+        if not database_available:
+            raise HTTPException(status_code=503, detail="Database not available")
+        
+        if account_type not in ACCOUNT_TYPES:
+            raise HTTPException(status_code=400, detail=f"Invalid account type. Must be one of: {list(ACCOUNT_TYPES.keys())}")
+        
+        account_config = ACCOUNT_TYPES[account_type]
+        
+        try:
+            async with await psycopg.AsyncConnection.connect(database_url) as conn:
+                async with conn.cursor() as cur:
+                    # Reset user account
+                    await cur.execute("""
+                        UPDATE user_accounts 
+                        SET account_type = %s, max_prompts = %s, energy_tokens = %s, prompts_used = 0, status = 'active', last_active = NOW()
+                        WHERE user_id = %s
+                    """, (
+                        account_type,
+                        account_config["max_prompts"],
+                        100 if account_type == "user" else 0,  # Give 100 energy tokens to users
+                        user_id
+                    ))
+                    
+                    if cur.rowcount == 0:
+                        # User doesn't exist, create them
+                        await cur.execute("""
+                            INSERT INTO user_accounts (user_id, account_type, username, email, max_prompts, energy_tokens, prompts_used, created_at, status)
+                            VALUES (%s, %s, %s, %s, %s, %s, 0, NOW(), 'active')
+                        """, (
+                            user_id,
+                            account_type,
+                            f"Test_{user_id}",
+                            f"{user_id}@test.com",
+                            account_config["max_prompts"],
+                            100 if account_type == "user" else 0
+                        ))
+                    
+                    await conn.commit()
+                    
+                    return {
+                        "message": f"Test account reset successfully",
+                        "user_id": user_id,
+                        "account_type": account_type,
+                        "max_prompts": account_config["max_prompts"],
+                        "energy_tokens": 100 if account_type == "user" else 0,
+                        "prompts_used": 0
+                    }
+                    
+        except Exception as db_error:
+            raise HTTPException(status_code=500, detail=f"Database error: {str(db_error)}")
+            
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to reset test account: {str(e)}")
+
+@app.get("/test/account-status/{user_id}")
+async def get_test_account_status(user_id: str):
+    """Get detailed status of a test account"""
+    try:
+        if not database_available:
+            raise HTTPException(status_code=503, detail="Database not available")
+        
+        try:
+            async with await psycopg.AsyncConnection.connect(database_url) as conn:
+                async with conn.cursor() as cur:
+                    await cur.execute("""
+                        SELECT account_type, prompts_used, max_prompts, energy_tokens, created_at, last_active, status
+                        FROM user_accounts 
+                        WHERE user_id = %s
+                    """, (user_id,))
+                    
+                    row = await cur.fetchone()
+                    if not row:
+                        return {
+                            "user_id": user_id,
+                            "exists": False,
+                            "message": "User account not found"
+                        }
+                    
+                    account_type, prompts_used, max_prompts, energy_tokens, created_at, last_active, status = row
+                    
+                    # Get memory and conversation counts
+                    await cur.execute("""
+                        SELECT COUNT(DISTINCT um.id) as memory_count, COUNT(DISTINCT ct.id) as conversation_count
+                        FROM user_accounts ua
+                        LEFT JOIN user_memory um ON ua.user_id = um.user_id
+                        LEFT JOIN conversation_turns ct ON ua.user_id = ct.user_id
+                        WHERE ua.user_id = %s
+                        GROUP BY ua.user_id
+                    """, (user_id,))
+                    
+                    counts_row = await cur.fetchone()
+                    memory_count = counts_row[0] if counts_row else 0
+                    conversation_count = counts_row[1] if counts_row else 0
+                    
+                    return {
+                        "user_id": user_id,
+                        "exists": True,
+                        "account_type": account_type,
+                        "prompts_used": prompts_used,
+                        "max_prompts": max_prompts,
+                        "energy_tokens": energy_tokens,
+                        "memory_count": memory_count,
+                        "conversation_count": conversation_count,
+                        "created_at": created_at.isoformat() if created_at else None,
+                        "last_active": last_active.isoformat() if last_active else None,
+                        "status": status,
+                        "can_make_request": (
+                            (account_type == "limited_guest" and prompts_used < max_prompts) or
+                            (account_type == "user" and energy_tokens > 0) or
+                            account_type in ["admin", "unlimited_guest"]
+                        )
+                    }
+                    
+        except Exception as db_error:
+            raise HTTPException(status_code=500, detail=f"Database error: {str(db_error)}")
+            
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get account status: {str(e)}")
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8077, reload=True)

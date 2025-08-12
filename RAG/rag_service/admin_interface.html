@@ -309,6 +309,7 @@
             <button class="nav-tab active" onclick="showTab('overview')">📊 Overview</button>
             <button class="nav-tab" onclick="showTab('users')">👥 Users</button>
             <button class="nav-tab" onclick="showTab('data')">🗄️ Data Management</button>
+            <button class="nav-tab" onclick="showTab('testing')">🧪 Testing</button>
             <button class="nav-tab" onclick="showTab('system')">⚙️ System</button>
         </div>
 
@@ -395,6 +396,53 @@
                     <input type="text" id="deleteUserId" class="form-control" placeholder="e.g., user123">
                 </div>
                 <button class="btn btn-danger" onclick="deleteUser()">💀 Delete User</button>
+            </div>
+        </div>
+
+        <!-- Testing Tab -->
+        <div id="testing" class="tab-content">
+            <div class="card">
+                <h3>🧪 Unity User Type Testing</h3>
+                <p>Test different account types and limits for Unity development</p>
+                
+                <div class="form-group">
+                    <label for="testUserId">Test User ID</label>
+                    <input type="text" id="testUserId" class="form-control" placeholder="e.g., unity_test_user, test_admin, etc.">
+                </div>
+                
+                <div class="form-group">
+                    <label for="testAccountType">Account Type</label>
+                    <select id="testAccountType" class="form-control">
+                        <option value="limited_guest">Limited Guest (20 prompts, no memory)</option>
+                        <option value="unlimited_guest">Unlimited Guest (unlimited prompts, no memory)</option>
+                        <option value="user">User (energy tokens, full memory)</option>
+                        <option value="admin">Admin (unlimited, full access)</option>
+                    </select>
+                </div>
+                
+                <div class="form-group" id="energyTokensGroup" style="display: none;">
+                    <label for="testEnergyTokens">Initial Energy Tokens</label>
+                    <input type="number" id="testEnergyTokens" class="form-control" value="100" min="1" max="1000">
+                </div>
+                
+                <button class="btn btn-success" onclick="createTestAccount()">🚀 Create Test Account</button>
+                <button class="btn btn-warning" onclick="resetTestAccount()">🔄 Reset Account</button>
+                <button class="btn btn-info" onclick="checkTestAccountStatus()">📊 Check Status</button>
+            </div>
+
+            <div class="card">
+                <h3>📋 Test Results</h3>
+                <div id="testResults">No tests run yet</div>
+            </div>
+
+            <div class="card">
+                <h3>🎯 Quick Test Scenarios</h3>
+                <div class="form-group">
+                    <button class="btn btn-primary" onclick="runQuickTest('limited_guest')">Test Limited Guest (20 prompts)</button>
+                    <button class="btn btn-primary" onclick="runQuickTest('unlimited_guest')">Test Unlimited Guest</button>
+                    <button class="btn btn-primary" onclick="runQuickTest('user')">Test User (100 tokens)</button>
+                    <button class="btn btn-primary" onclick="runQuickTest('admin')">Test Admin</button>
+                </div>
             </div>
         </div>
 
@@ -670,7 +718,172 @@
         document.addEventListener('DOMContentLoaded', function() {
             refreshStats();
             checkHealth();
+            setupTestingInterface();
         });
+
+        // Setup testing interface
+        function setupTestingInterface() {
+            const accountTypeSelect = document.getElementById('testAccountType');
+            const energyTokensGroup = document.getElementById('energyTokensGroup');
+            
+            accountTypeSelect.addEventListener('change', function() {
+                if (this.value === 'user') {
+                    energyTokensGroup.style.display = 'block';
+                } else {
+                    energyTokensGroup.style.display = 'none';
+                }
+            });
+        }
+
+        // Testing functions
+        async function createTestAccount() {
+            const userId = document.getElementById('testUserId').value.trim();
+            const accountType = document.getElementById('testAccountType').value;
+            const energyTokens = document.getElementById('testEnergyTokens').value;
+            
+            if (!userId) {
+                showTestResult('❌ Please enter a test user ID', 'error');
+                return;
+            }
+            
+            try {
+                const result = await apiCall('/test/create-account', {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        user_id: userId,
+                        account_type: accountType,
+                        username: `Test_${userId}`,
+                        email: `${userId}@test.com`,
+                        initial_energy_tokens: accountType === 'user' ? parseInt(energyTokens) : 0
+                    })
+                });
+                
+                showTestResult(`✅ ${result.message}`, 'success');
+                showTestResult(`📊 Account Type: ${result.account_type}`, 'info');
+                showTestResult(`🎯 Max Prompts: ${result.max_prompts === -1 ? 'Unlimited' : result.max_prompts}`, 'info');
+                if (result.energy_tokens > 0) {
+                    showTestResult(`⚡ Energy Tokens: ${result.energy_tokens}`, 'info');
+                }
+                
+            } catch (error) {
+                showTestResult(`❌ Failed to create test account: ${error.message}`, 'error');
+            }
+        }
+
+        async function resetTestAccount() {
+            const userId = document.getElementById('testUserId').value.trim();
+            const accountType = document.getElementById('testAccountType').value;
+            
+            if (!userId) {
+                showTestResult('❌ Please enter a test user ID', 'error');
+                return;
+            }
+            
+            try {
+                const result = await apiCall(`/test/reset-account/${userId}?account_type=${accountType}`, {
+                    method: 'POST'
+                });
+                
+                showTestResult(`✅ ${result.message}`, 'success');
+                showTestResult(`🔄 Reset to: ${result.account_type}`, 'info');
+                showTestResult(`🎯 Max Prompts: ${result.max_prompts === -1 ? 'Unlimited' : result.max_prompts}`, 'info');
+                if (result.energy_tokens > 0) {
+                    showTestResult(`⚡ Energy Tokens: ${result.energy_tokens}`, 'info');
+                }
+                
+            } catch (error) {
+                showTestResult(`❌ Failed to reset test account: ${error.message}`, 'error');
+            }
+        }
+
+        async function checkTestAccountStatus() {
+            const userId = document.getElementById('testUserId').value.trim();
+            
+            if (!userId) {
+                showTestResult('❌ Please enter a test user ID', 'error');
+                return;
+            }
+            
+            try {
+                const result = await apiCall(`/test/account-status/${userId}`);
+                
+                if (result.exists) {
+                    showTestResult(`📊 Account Status for ${userId}`, 'info');
+                    showTestResult(`🏷️ Type: ${result.account_type}`, 'info');
+                    showTestResult(`📝 Prompts Used: ${result.prompts_used}/${result.max_prompts === -1 ? '∞' : result.max_prompts}`, 'info');
+                    if (result.energy_tokens > 0) {
+                        showTestResult(`⚡ Energy Tokens: ${result.energy_tokens}`, 'info');
+                    }
+                    showTestResult(`🧠 Memories: ${result.memory_count}`, 'info');
+                    showTestResult(`💬 Conversations: ${result.conversation_count}`, 'info');
+                    showTestResult(`✅ Can Make Request: ${result.can_make_request ? 'Yes' : 'No'}`, result.can_make_request ? 'success' : 'error');
+                } else {
+                    showTestResult(`❌ User ${userId} not found`, 'error');
+                }
+                
+            } catch (error) {
+                showTestResult(`❌ Failed to check account status: ${error.message}`, 'error');
+            }
+        }
+
+        async function runQuickTest(accountType) {
+            const testUserId = `quick_test_${accountType}_${Date.now()}`;
+            
+            // Set the form values
+            document.getElementById('testUserId').value = testUserId;
+            document.getElementById('testAccountType').value = accountType;
+            
+            showTestResult(`🚀 Running quick test for ${accountType}...`, 'info');
+            
+            try {
+                // Create the test account
+                const result = await apiCall('/test/create-account', {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        user_id: testUserId,
+                        account_type: accountType,
+                        username: `QuickTest_${accountType}`,
+                        email: `${testUserId}@quicktest.com`,
+                        initial_energy_tokens: accountType === 'user' ? 100 : 0
+                    })
+                });
+                
+                showTestResult(`✅ Quick test account created: ${testUserId}`, 'success');
+                showTestResult(`📊 Type: ${result.account_type}`, 'info');
+                
+                // Test a query to see if it works
+                const queryResult = await apiCall('/query', {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        query: "Hello, this is a quick test!",
+                        user_id: testUserId
+                    })
+                });
+                
+                showTestResult(`💬 Test query successful!`, 'success');
+                showTestResult(`📝 Response: ${queryResult.results[0].text.substring(0, 100)}...`, 'info');
+                
+                // Check final status
+                const statusResult = await apiCall(`/test/account-status/${testUserId}`);
+                showTestResult(`📊 Final Status: ${statusResult.prompts_used} prompts used`, 'info');
+                
+            } catch (error) {
+                showTestResult(`❌ Quick test failed: ${error.message}`, 'error');
+            }
+        }
+
+        function showTestResult(message, type = 'info') {
+            const resultsDiv = document.getElementById('testResults');
+            const timestamp = new Date().toLocaleTimeString();
+            const colorClass = type === 'error' ? 'text-danger' : type === 'success' ? 'text-success' : 'text-info';
+            
+            const resultHtml = `<div class="${colorClass}" style="margin: 5px 0; padding: 5px; border-left: 3px solid ${type === 'error' ? '#dc3545' : type === 'success' ? '#28a745' : '#17a2b8'}; padding-left: 10px;">
+                <small>[${timestamp}]</small> ${message}
+            </div>`;
+            
+            resultsDiv.innerHTML += resultHtml;
+            resultsDiv.scrollTop = resultsDiv.scrollHeight;
+        }
 
         // View companion profile
         async function viewCompanionProfile(userId) {
