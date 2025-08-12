@@ -362,6 +362,14 @@
         <!-- Data Management Tab -->
         <div id="data" class="tab-content">
             <div class="card">
+                <h3>🗄️ Database Setup</h3>
+                <div class="alert alert-success" id="dbAlert"></div>
+                <p>Initialize required database tables for the account system to work</p>
+                <button class="btn btn-success" onclick="initializeDatabase()">🗄️ Initialize Database Tables</button>
+                <span id="dbInitStatus" style="margin-left: 10px;"></span>
+            </div>
+
+            <div class="card">
                 <h3>Clear User Data</h3>
                 <div class="alert alert-success" id="dataAlert"></div>
                 <div class="form-group">
@@ -611,6 +619,28 @@
         }
 
         // Data Management Functions
+        async function initializeDatabase() {
+            try {
+                document.getElementById('dbInitStatus').textContent = '🔄 Initializing...';
+                
+                const result = await apiCall('/admin/init-database', {
+                    method: 'POST'
+                });
+                
+                document.getElementById('dbInitStatus').textContent = '✅ Success!';
+                showAlert(result.message, 'success');
+                
+                // Refresh the page after a short delay to show the new tables
+                setTimeout(() => {
+                    location.reload();
+                }, 2000);
+                
+            } catch (error) {
+                document.getElementById('dbInitStatus').textContent = '❌ Failed';
+                showAlert(`Failed to initialize database: ${error.message}`, 'danger');
+            }
+        }
+
         async function clearData() {
             const userId = document.getElementById('clearUserId').value.trim() || null;
             const dataTypes = [];

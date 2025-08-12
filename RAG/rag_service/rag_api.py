@@ -2483,6 +2483,58 @@ async def debug_database():
     except Exception as e:
         return {"error": str(e), "traceback": str(e.__traceback__)}
 
+@app.post("/admin/init-database")
+async def initialize_database_tables():
+    """Initialize required database tables if they don't exist"""
+    try:
+        if not database_available:
+            raise HTTPException(status_code=503, detail="Database not available")
+        
+        async with await psycopg.AsyncConnection.connect(database_url) as conn:
+            async with conn.cursor() as cur:
+                # Create user_accounts table if it doesn't exist
+                await cur.execute("""
+                    CREATE TABLE IF NOT EXISTS user_accounts (
+                        user_id TEXT PRIMARY KEY,
+                        account_type TEXT NOT NULL DEFAULT 'limited_guest',
+                        username TEXT,
+                        email TEXT,
+                        max_prompts INTEGER DEFAULT 20,
+                        energy_tokens INTEGER DEFAULT 0,
+                        prompts_used INTEGER DEFAULT 0,
+                        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+                        last_active TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+                        status TEXT DEFAULT 'active'
+                    )
+                """)
+                
+                # Create conversation_turns table if it doesn't exist
+                await cur.execute("""
+                    CREATE TABLE IF NOT EXISTS conversation_turns (
+                        id SERIAL PRIMARY KEY,
+                        user_id TEXT NOT NULL,
+                        user_message TEXT NOT NULL,
+                        assistant_response TEXT NOT NULL,
+                        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+                    )
+                """)
+                
+                # Add indexes for better performance
+                await cur.execute("CREATE INDEX IF NOT EXISTS idx_user_accounts_user_id ON user_accounts(user_id)")
+                await cur.execute("CREATE INDEX IF NOT EXISTS idx_conversation_turns_user_id ON conversation_turns(user_id)")
+                await cur.execute("CREATE INDEX IF NOT EXISTS idx_user_memory_user_id ON user_memory(user_id)")
+                
+                await conn.commit()
+                
+                return {
+                    "message": "Database tables initialized successfully",
+                    "tables_created": ["user_accounts", "conversation_turns"],
+                    "indexes_created": ["idx_user_accounts_user_id", "idx_conversation_turns_user_id", "idx_user_memory_user_id"]
+                }
+                
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to initialize database: {str(e)}")
+
 @app.get("/companion/{user_id}/profile")
 async def get_companion_profile(user_id: str):
     """Get companion profile - only shows data for the specified companion"""
