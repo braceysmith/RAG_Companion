@@ -2368,8 +2368,8 @@ async def get_system_stats():
         try:
             async with await psycopg.AsyncConnection.connect(database_url) as conn:
                 async with conn.cursor() as cur:
-                    # Get user count from user_memory table
-                    await cur.execute("SELECT COUNT(DISTINCT user_id) FROM user_memory")
+                    # Get user count from user_accounts table (more accurate)
+                    await cur.execute("SELECT COUNT(*) FROM user_accounts")
                     user_count = await cur.fetchone()
                     total_users = user_count[0] if user_count else 0
                     
@@ -2384,8 +2384,8 @@ async def get_system_stats():
                     total_documents = doc_count[0] if doc_count else 0
                     
                     return SystemStats(
-                        total_users=total_users + 1,  # +1 for admin
-                        active_users=total_users + 1,
+                        total_users=total_users,  # user_accounts already includes admin
+                        active_users=total_users,  # user_accounts already includes admin
                         total_conversations=total_conversations,
                         total_documents=total_documents,
                         database_size_mb=5.0,  # Placeholder
