@@ -19,6 +19,8 @@ from chunker import DocumentChunker, DocumentProcessor
 from mcp_tools import tool_manager
 from audio_handler import audio_handler
 from hybrid_rag_system import get_hybrid_rag, process_voice_query
+from companion_system.needs_framework import needs_framework, memory_enhancer
+from companion_system.needs_database import NeedsDatabase
 
 # Load environment variables
 load_dotenv()
@@ -51,6 +53,9 @@ async def admin_interface():
 # Initialize database with better error handling
 database_url = os.getenv("DATABASE_URL", "postgresql://user:password@localhost/rag_db")
 db = RAGDatabase(database_url)
+
+# Initialize needs framework and database
+needs_db = NeedsDatabase(database_url)
 
 # Global variable to track database status
 database_available = False
@@ -2849,6 +2854,160 @@ async def get_test_account_status(user_id: str):
             
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to get account status: {str(e)}")
+
+# Needs Assessment and Goals API Endpoints
+@app.post("/needs/assess")
+async def assess_user_needs(user_id: str, responses: Dict[str, int]):
+    """Assess user needs based on their responses"""
+    try:
+        if not database_available:
+            raise HTTPException(status_code=503, detail="Database not available")
+        
+        # Convert responses to proper format
+        needs_responses = {}
+        for category, tier in responses.items():
+            try:
+                needs_responses[NeedCategory(category)] = NeedTier(tier)
+            except ValueError:
+                continue  # Skip invalid categories/tiers
+        
+        # Generate assessment
+        assessment = needs_framework.assess_user_needs(user_id, needs_responses)
+        priority_needs = needs_framework.get_priority_needs(assessment)
+        assessment["priority_needs"] = priority_needs
+        
+        # Store assessment in database
+        await needs_db.store_needs_assessment(user_id, assessment)
+        
+        return {
+            "message": "Needs assessment completed successfully",
+            "assessment": assessment,
+            "priority_needs": priority_needs
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to assess user needs: {str(e)}")
+
+@app.get("/needs/assessment/{user_id}")
+async def get_user_needs_assessment(user_id: str):
+    """Get the latest needs assessment for a user"""
+    try:
+        if not database_available:
+            raise HTTPException(status_code=503, detail="Database not available")
+        
+        assessment = await needs_db.get_latest_needs_assessment(user_id)
+        if not assessment:
+            return {
+                "user_id": user_id,
+                "message": "No needs assessment found",
+                "assessment": None
+            }
+        
+        return {
+            "user_id": user_id,
+            "assessment": assessment
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get needs assessment: {str(e)}")
+
+@app.post("/goals/create")
+async def create_user_goal(user_id: str, goal_data: Dict[str, Any]):
+    """Create a new goal for a user"""
+    try:
+        if not database_available:
+            raise HTTPException(status_code=503, detail="Database not available")
+        
+        success = await needs_db.store_user_goal(user_id, goal_data)
+        if success:
+            return {
+                "message": "Goal created successfully",
+                "user_id": user_id,
+                "goal": goal_data
+            }
+        else:
+            raise HTTPException(status_code=500, detail="Failed to create goal")
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to create goal: {str(e)}")
+
+@app.get("/goals/{user_id}")
+async def get_user_goals(user_id: str, status: str = "active"):
+    """Get all goals for a user"""
+    try:
+        if not database_available:
+            raise HTTPException(status_code=503, detail="Database not available")
+        
+        goals = await needs_db.get_user_goals(user_id, status)
+        return {
+            "user_id": user_id,
+            "goals": goals,
+            "total_goals": len(goals)
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get user goals: {str(e)}")
+
+@app.post("/reminders/create")
+async def create_user_reminder(user_id: str, reminder_data: Dict[str, Any]):
+    """Create a new reminder for a user"""
+    try:
+        if not database_available:
+            raise HTTPException(status_code=503, detail="Database not available")
+        
+        success = await needs_db.store_user_reminder(user_id, reminder_data)
+        if success:
+            return {
+                "message": "Reminder created successfully",
+                "user_id": user_id,
+                "reminder": reminder_data
+            }
+        else:
+            raise HTTPException(status_code=500, detail="Failed to create reminder")
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to create reminder: {str(e)}")
+
+@app.get("/reminders/{user_id}")
+async def get_user_reminders(user_id: str, status: str = "pending"):
+    """Get all reminders for a user"""
+    try:
+        if not database_available:
+            raise HTTPException(status_code=503, detail="Database not available")
+        
+        reminders = await needs_db.get_user_reminders(user_id, status)
+        return {
+            "user_id": user_id,
+            "reminders": reminders,
+            "total_reminders": len(reminders)
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get user reminders: {str(e)}")
+
+@app.post("/needs/initialize-tables")
+async def initialize_needs_tables():
+    """Initialize the needs tracking database tables"""
+    try:
+        if not database_available:
+            raise HTTPException(status_code=503, detail="Database not available")
+        
+        success = await needs_db.initialize_needs_tables()
+        if success:
+            return {
+                "message": "Needs tracking tables initialized successfully",
+                "tables_created": [
+                    "user_needs_assessments",
+                    "user_goals", 
+                    "user_reminders",
+                    "user_progress_logs"
+                ]
+            }
+        else:
+            raise HTTPException(status_code=500, detail="Failed to initialize needs tables")
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to initialize needs tables: {str(e)}")
 
 if __name__ == "__main__":
     import uvicorn

@@ -455,6 +455,14 @@
             </div>
 
             <div class="card">
+                <h3>🧠 Needs Framework Setup</h3>
+                <div class="alert alert-success" id="needsAlert"></div>
+                <p>Initialize needs tracking tables for the hierarchy of needs framework</p>
+                <button class="btn btn-info" onclick="initializeNeedsTables()">🧠 Initialize Needs Tables</button>
+                <span id="needsInitStatus" style="margin-left: 10px;"></span>
+            </div>
+
+            <div class="card">
                 <h3>Clear User Data</h3>
                 <div class="alert alert-success" id="dataAlert"></div>
                 <div class="form-group">
@@ -723,6 +731,23 @@
             } catch (error) {
                 document.getElementById('dbInitStatus').textContent = '❌ Failed';
                 showAlert(`Failed to initialize database: ${error.message}`, 'danger');
+            }
+        }
+
+        async function initializeNeedsTables() {
+            try {
+                document.getElementById('needsInitStatus').textContent = '🔄 Initializing...';
+                
+                const result = await apiCall('/needs/initialize-tables', {
+                    method: 'POST'
+                });
+                
+                document.getElementById('needsInitStatus').textContent = '✅ Success!';
+                showAlert(result.message, 'success');
+                
+            } catch (error) {
+                document.getElementById('needsInitStatus').textContent = '❌ Failed';
+                showAlert(`Failed to initialize needs tables: ${error.message}`, 'danger');
             }
         }
 
