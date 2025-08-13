@@ -100,27 +100,33 @@ namespace RAGCompanion.Mobile
         /// </summary>
         public void SendTextMessage(string message, string messageType = "message")
         {
+            LogMessage($"🎵 EnhancedAudioHandler.SendTextMessage called: {messageType} - {message.Substring(0, Math.Min(30, message.Length))}...");
+            
             if (dataChannel?.ReadyState != RTCDataChannelState.Open)
             {
-                LogMessage("Data channel not ready for text transmission");
+                LogMessage("❌ Data channel not ready for text transmission");
                 return;
             }
+            
+            LogMessage("✅ Data channel ready - proceeding with message send...");
             
             try
             {
                 // Check if message needs chunking
                 if (message.Length > maxMessageSize)
                 {
+                    LogMessage($"📦 Message needs chunking ({message.Length} chars > {maxMessageSize})");
                     SendChunkedMessage(message, messageType);
                 }
                 else
                 {
+                    LogMessage($"📤 Sending single message ({message.Length} chars)");
                     SendSingleMessage(message, messageType);
                 }
             }
             catch (Exception ex)
             {
-                LogMessage($"Error sending text message: {ex.Message}");
+                LogMessage($"❌ Error sending text message: {ex.Message}");
             }
         }
         
@@ -322,6 +328,8 @@ namespace RAGCompanion.Mobile
         
         private void SendSingleMessage(string message, string messageType)
         {
+            LogMessage($"📤 SendSingleMessage: Creating message event for '{messageType}'");
+            
             var messageEvent = new JObject
             {
                 ["type"] = "conversation.item.create",
@@ -343,10 +351,11 @@ namespace RAGCompanion.Mobile
             string eventJson = messageEvent.ToString(Newtonsoft.Json.Formatting.None);
             byte[] eventBytes = Encoding.UTF8.GetBytes(eventJson);
             
+            LogMessage($"📡 Sending {eventBytes.Length} bytes through data channel...");
             dataChannel.Send(eventBytes);
             currentBufferSize += eventBytes.Length;
             
-            LogMessage($"Sent single message ({message.Length} chars)");
+            LogMessage($"✅ Single message sent successfully ({message.Length} chars)");
         }
         
         private IEnumerator DelayedChunkSend()

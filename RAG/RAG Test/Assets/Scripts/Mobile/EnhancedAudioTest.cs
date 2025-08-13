@@ -77,7 +77,7 @@ namespace RAGCompanion.Mobile
             }
             
             // Test basic functionality
-            bool isConnected = realtimeChat.IsConnected();
+            bool isConnected = realtimeChat.IsConnected;
             Debug.Log($"[EnhancedAudioTest] Realtime Chat Connection Status: {isConnected}");
             
             // Test audio system status

@@ -26,10 +26,12 @@ namespace RAGCompanion.Mobile
         [Header("Audio Configuration")]
         [SerializeField] private bool enableEnhancedAudio = true;
         [SerializeField] private float audioSampleRate = 24000f;
+        [SerializeField] private float silenceThreshold = 1.0f; // Seconds of silence before marking response complete
         
         [Header("RAG Integration")]
         [SerializeField] private bool enableRAGContext = true;
         [SerializeField] private bool enableAutoGreeting = true;
+        [SerializeField] private float greetingDelay = 1.5f; // Delay before greeting (seconds)
         
         [Header("User Configuration")]
         [SerializeField] private string userId = "unity_user";
@@ -56,12 +58,12 @@ namespace RAGCompanion.Mobile
         private int reconnectAttempts = 0;
         private const int MAX_RECONNECT_ATTEMPTS = 3;
         
-        // Adaptive conversation timing
-        private float lastUserInputTime = 0f;
-        private float lastAIResponseTime = 0f;
-        private float averageResponseDuration = 2.0f; // Track average AI response time
-        private int responseCount = 0;
-        private bool isWaitingForResponse = false;
+        // Audio-based conversation timing
+        private bool isAIResponding = false;
+        private Coroutine responseCompletionTimer;
+        
+        // Voice input state
+        private bool isTalking = false;
         
         // Audio transcript tracking
         private StringBuilder currentTranscript = new StringBuilder();
@@ -76,6 +78,8 @@ namespace RAGCompanion.Mobile
         public event Action OnConnectionEstablished;
         public event Action OnConnectionLost;
         public event Action<string> OnError;
+        public event Action<string> OnTranscriptReceived;
+        public event Action<string> OnAIResponseReceived;
         
         private void Start()
         {
@@ -511,8 +515,8 @@ namespace RAGCompanion.Mobile
                         ["modalities"] = new JArray { "text", "audio" },
                         ["instructions"] = GetDefaultInstructions(),
                         ["voice"] = "alloy",
-                        ["input_audio_format"] = "pcm16",
-                        ["output_audio_format"] = "pcm16",
+                                        ["input_audio_format"] = "pcm16",
+                ["output_audio_format"] = "pcm16",
                         ["input_audio_transcription"] = new JObject
                         {
                             ["model"] = "whisper-1"
@@ -567,8 +571,12 @@ namespace RAGCompanion.Mobile
         
         private IEnumerator DelayedAutoGreeting()
         {
-            // Wait for connection to be fully stable before greeting
-            yield return new WaitForSeconds(0.5f); // Minimal delay for connection stability
+            LogMessage("🤝 Auto-greeting coroutine started");
+            
+            LogMessage($"⏳ Waiting {greetingDelay} seconds before greeting user...");
+            yield return new WaitForSeconds(greetingDelay);
+            
+            LogMessage("⏰ Greeting delay completed - checking connection...");
             
             if (!isConnectionActive)
             {
@@ -576,17 +584,19 @@ namespace RAGCompanion.Mobile
                 yield break;
             }
             
-            LogMessage("🤝 Generating personalized greeting...");
+            LogMessage("✅ Connection still active - proceeding with greeting...");
             
             // Get user's name from RAG system using coroutine
             yield return StartCoroutine(GetUserNameCoroutine((userName) => {
                 // Generate appropriate greeting based on whether we know the name
                 string greetingMessage = GenerateGreetingMessage(userName);
                 
-                LogMessage($"📢 Delivering greeting: {greetingMessage}");
+                LogMessage($"📢 Generated greeting: {greetingMessage}");
                 
-                // Deliver greeting through normal conversation flow for natural timing
-                SendTextMessage(greetingMessage);
+                // Deliver greeting directly through voice system (bypassing full AI conversation)
+                LogMessage("📤 Triggering direct AI greeting...");
+                TriggerDirectAIMessage(greetingMessage);
+                LogMessage("✅ Direct AI greeting triggered successfully");
             }));
         }
         
@@ -602,7 +612,7 @@ namespace RAGCompanion.Mobile
             }
             
             // Try to get user profile from server
-            using (UnityEngine.Networking.UnityWebRequest request = UnityEngine.Networking.UnityWebRequest.Get($"{ragApiUrl}/companion/{userId}/profile"))
+            using (UnityEngine.Networking.UnityWebRequest request = UnityEngine.Networking.UnityWebRequest.Get($"{ragApiUrl}/user/{userId}/profile"))
             {
                 yield return request.SendWebRequest();
                 
@@ -716,6 +726,14 @@ namespace RAGCompanion.Mobile
                         LogMessage("Conversation created");
                         break;
                         
+                    case "conversation.item.input_audio_transcription.completed":
+                        HandleAudioTranscription(jsonMessage);
+                        break;
+                        
+                    case "conversation.item.input_audio_transcription.delta":
+                        HandleAudioTranscriptionDelta(jsonMessage);
+                        break;
+                        
                     case "response.audio.delta":
                         HandleAudioResponseDelta(jsonMessage);
                         break;
@@ -755,12 +773,18 @@ namespace RAGCompanion.Mobile
         {
             LogMessage("Audio response delta received - AI is speaking");
             
-            // Track response timing for adaptive conversation flow
-            if (!isWaitingForResponse)
+            // Start AI response tracking
+            if (!isAIResponding)
             {
-                isWaitingForResponse = true;
-                lastAIResponseTime = Time.time;
-                LogMessage("🎯 AI response started - tracking timing");
+                isAIResponding = true;
+                LogMessage("🎯 AI response started - audio detected");
+                
+                // Cancel any existing completion timer
+                if (responseCompletionTimer != null)
+                {
+                    StopCoroutine(responseCompletionTimer);
+                    responseCompletionTimer = null;
+                }
             }
             
             // Reset safety timeout when audio activity is detected
@@ -785,25 +809,61 @@ namespace RAGCompanion.Mobile
             }
         }
         
+        private void HandleTranscriptReceived(string transcript)
+        {
+            LogMessage($"Transcript received: {transcript}");
+            OnTranscriptReceived?.Invoke(transcript);
+        }
+        
+        private void HandleAIResponseReceived(string response)
+        {
+            LogMessage($"AI response received: {response.Substring(0, Math.Min(50, response.Length))}...");
+            OnAIResponseReceived?.Invoke(response);
+        }
+        
+        private void HandleAudioTranscription(JObject message)
+        {
+            var transcript = message["transcript"]?.ToString();
+            if (!string.IsNullOrEmpty(transcript))
+            {
+                LogMessage($"Audio transcript completed: {transcript}");
+                currentTranscript.Clear();
+                currentTranscript.Append(transcript);
+                
+                OnTranscriptReceived?.Invoke(transcript);
+                
+                // Update UI - transcript received, now waiting for AI response
+                if (companionUI != null)
+                {
+                    companionUI.ShowTranscript(transcript);
+                    companionUI.AddMessage(transcript, "user");
+                    companionUI.ShowProcessingIndicator(false);
+                    
+                    // Show that we're now waiting for AI response
+                    companionUI.UpdateStatusText("AI is thinking...");
+                }
+            }
+        }
+        
+        private void HandleAudioTranscriptionDelta(JObject message)
+        {
+            var delta = message["delta"]?.ToString();
+            if (!string.IsNullOrEmpty(delta))
+            {
+                currentTranscript.Append(delta);
+                LogMessage($"Transcript delta: {delta}");
+            }
+        }
+        
         private void HandleAudioResponseDone(JObject message)
         {
             LogMessage("Audio response complete");
             
-            // Calculate adaptive response timing
-            if (isWaitingForResponse)
+            // Start silence timer to detect if response is truly complete
+            if (isAIResponding)
             {
-                float responseDuration = Time.time - lastAIResponseTime;
-                UpdateResponseTiming(responseDuration);
-                isWaitingForResponse = false;
-                LogMessage($"⏱️ AI response completed in {responseDuration:F1}s (avg: {averageResponseDuration:F1}s)");
-            }
-            
-            // Update UI to show we're ready
-            if (companionUI != null)
-            {
-                companionUI.ShowAudioPlaybackIndicator(false);
-                companionUI.ShowProcessingIndicator(false);
-                companionUI.UpdateStatusText("Ready - Tap to talk");
+                LogMessage("🔇 Audio stopped - starting silence timer...");
+                responseCompletionTimer = StartCoroutine(ResponseCompletionTimer());
             }
             
             // Process any queued audio/messages
@@ -828,13 +888,38 @@ namespace RAGCompanion.Mobile
         
         private void HandleResponseDone(JObject message)
         {
-            LogMessage("Response complete");
+            LogMessage("🎵 RESPONSE.DONE received - AI response COMPLETELY finished");
+            LogMessage($"🎵 Previous isAIResponding state: {isAIResponding}");
             
-            // Process any queued audio/messages
-            if (enableEnhancedAudio && enhancedAudioHandler != null)
+            isAIResponding = false;
+            LogMessage("✅ AI response COMPLETELY finished - resetting to idle state");
+            
+            // NOW it's safe to reset UI state - the entire response is done
+            if (companionUI != null)
             {
-                enhancedAudioHandler.ProcessQueuedAudio();
-                enhancedAudioHandler.ProcessQueuedMessages();
+                LogMessage("🎵 Turning off audio playback indicator - response is fully complete");
+                companionUI.ShowAudioPlaybackIndicator(false);
+                companionUI.ShowProcessingIndicator(false);
+                companionUI.UpdateStatusText("Ready - Tap to talk");
+            }
+            
+            // Add safety timeout to ensure UI resets even if audio events are missed
+            StartCoroutine(SafetyResetUIAfterDelay(10f));
+            
+            LogMessage("🎵 Audio playback should now be complete and UI reset to idle");
+        }
+        
+        private IEnumerator SafetyResetUIAfterDelay(float delay)
+        {
+            yield return new WaitForSeconds(delay);
+            
+            // Only reset if AI is not currently responding to something new
+            if (!isAIResponding && companionUI != null)
+            {
+                LogMessage("🔄 Safety timeout - resetting UI to idle state");
+                companionUI.ShowAudioPlaybackIndicator(false);
+                companionUI.ShowProcessingIndicator(false);
+                companionUI.UpdateStatusText("Ready - Tap to talk");
             }
         }
         
@@ -867,24 +952,29 @@ namespace RAGCompanion.Mobile
         
         public void SendTextMessage(string message)
         {
+            LogMessage($"📤 SendTextMessage called with: {message.Substring(0, Math.Min(50, message.Length))}...");
+            
             if (!isConnectionActive)
             {
                 LogError("Cannot send message - connection not active");
                 return;
             }
             
-            // Track user input timing for adaptive conversation flow
-            lastUserInputTime = Time.time;
+            LogMessage("✅ Connection active - proceeding with message send...");
             
             if (enableEnhancedAudio && enhancedAudioHandler != null)
             {
+                LogMessage("🎵 Using Enhanced Audio Handler to send message");
                 enhancedAudioHandler.SendTextMessage(message, "user_message");
             }
             else
             {
+                LogMessage("📡 Using direct data channel to send message");
                 // Fallback to direct sending
                 SendDirectTextMessage(message);
             }
+            
+            LogMessage("✅ SendTextMessage completed");
         }
         
         private void SendDirectTextMessage(string message)
@@ -925,50 +1015,81 @@ namespace RAGCompanion.Mobile
             }
         }
         
-        public void StartRecording()
+        public void StartVoiceInput()
         {
+            LogMessage($"StartVoiceInput called - isConnectionActive: {isConnectionActive}, isTalking: {isTalking}, localMicTrack != null: {localMicTrack != null}");
+            
             if (!isConnectionActive)
             {
-                LogError("Cannot start recording - connection not active");
+                LogError("Cannot start voice input - not connected to realtime session");
+                OnError?.Invoke("Not connected to realtime session");
                 return;
             }
             
-            if (localMicTrack != null)
+            if (isTalking)
             {
-                localMicTrack.Enabled = true;
-                LogMessage("Started recording");
+                LogMessage("Already recording voice input");
+                return;
+            }
+            
+            // Enable microphone for continuous listening
+            if (localMicTrack != null && microphoneClip != null)
+            {
+                LogMessage($"Starting audio streaming to OpenAI");
+                isTalking = true;
+                currentTranscript.Clear();
+                lastMicrophonePosition = Microphone.GetPosition(null);
                 
-                // Start audio streaming coroutine
+                // Start streaming audio data to OpenAI
                 if (audioStreamingCoroutine != null)
                 {
                     StopCoroutine(audioStreamingCoroutine);
                 }
-                audioStreamingCoroutine = StartCoroutine(AudioStreamingCoroutine());
+                audioStreamingCoroutine = StartCoroutine(StreamAudioToOpenAI());
                 
-                // Update UI
+                LogMessage($"Voice input started successfully - Audio streaming started");
+                
+                // Clear any previous audio buffer (just in case)
+                SendClearAudioBuffer();
+                
+                // Update UI state
                 if (companionUI != null)
                 {
                     companionUI.ShowRecordingIndicator(true);
-                    companionUI.UpdateStatusText("Recording... Tap to stop");
+                    companionUI.UpdateStatusText("Listening... Speak now");
                 }
+            }
+            else
+            {
+                LogError("Cannot start voice input - microphone not initialized");
+                OnError?.Invoke("Microphone not initialized");
             }
         }
         
-        public void StopRecording()
+        public void StopVoiceInput()
         {
-            if (localMicTrack != null)
+            LogMessage($"StopVoiceInput called - isTalking: {isTalking}");
+            
+            if (!isTalking)
             {
-                localMicTrack.Enabled = false;
-                LogMessage("Stopped recording");
-                
+                LogMessage("Voice input was not active, nothing to stop");
+                return;
+            }
+            
+            try
+            {
                 // Stop audio streaming
                 if (audioStreamingCoroutine != null)
                 {
+                    LogMessage($"Stopping audio streaming coroutine");
                     StopCoroutine(audioStreamingCoroutine);
                     audioStreamingCoroutine = null;
                 }
                 
-                // Update UI
+                isTalking = false;
+                LogMessage($"Voice input stopped successfully - waiting for server VAD to detect end");
+                
+                // Update UI state
                 if (companionUI != null)
                 {
                     companionUI.ShowRecordingIndicator(false);
@@ -976,11 +1097,30 @@ namespace RAGCompanion.Mobile
                     companionUI.UpdateStatusText("Processing speech...");
                 }
             }
+            catch (System.Exception ex)
+            {
+                LogError($"Error stopping voice input: {ex.Message}");
+                isTalking = false;
+                OnError?.Invoke($"Error stopping voice input: {ex.Message}");
+            }
         }
         
-        private IEnumerator AudioStreamingCoroutine()
+        // Legacy method names for compatibility
+        public void StartRecording()
         {
-            while (localMicTrack.Enabled && isConnectionActive)
+            StartVoiceInput();
+        }
+        
+        public void StopRecording()
+        {
+            StopVoiceInput();
+        }
+        
+        private IEnumerator StreamAudioToOpenAI()
+        {
+            LogMessage("🎤 StreamAudioToOpenAI coroutine started");
+            
+            while (isTalking && isConnectionActive)
             {
                 // Get microphone data
                 int currentPosition = Microphone.GetPosition(null);
@@ -1003,6 +1143,36 @@ namespace RAGCompanion.Mobile
                 }
                 
                 yield return new WaitForSeconds(0.1f); // 100ms intervals
+            }
+            
+            LogMessage("🎤 StreamAudioToOpenAI coroutine ended");
+        }
+        
+        private void SendClearAudioBuffer()
+        {
+            if (dataChannel?.ReadyState != RTCDataChannelState.Open)
+            {
+                LogMessage("Data channel not ready for clear audio buffer");
+                return;
+            }
+            
+            try
+            {
+                var clearEvt = new JObject
+                {
+                    ["type"] = "input_audio_buffer.clear"
+                };
+                
+                string eventJson = clearEvt.ToString(Newtonsoft.Json.Formatting.None);
+                byte[] eventBytes = Encoding.UTF8.GetBytes(eventJson);
+                
+                dataChannel.Send(eventBytes);
+                LogMessage("✅ Sent clear audio buffer event");
+                
+            }
+            catch (Exception ex)
+            {
+                LogError($"Error sending clear audio buffer: {ex.Message}");
             }
         }
         
@@ -1041,10 +1211,7 @@ namespace RAGCompanion.Mobile
             LogMessage("WebRTC connection closed");
         }
         
-        public bool IsConnected()
-        {
-            return isConnectionActive && dataChannel?.ReadyState == RTCDataChannelState.Open;
-        }
+
         
         public EnhancedAudioHandler.AudioSystemStatus GetAudioSystemStatus()
         {
@@ -1154,76 +1321,104 @@ namespace RAGCompanion.Mobile
         }
         
         /// <summary>
-        /// Update response timing statistics for adaptive conversation flow
+        /// Test method to send a simple message for debugging
         /// </summary>
-        private void UpdateResponseTiming(float responseDuration)
+        [ContextMenu("Test Send Message")]
+        public void TestSendMessage()
         {
-            responseCount++;
-            
-            // Calculate rolling average (weighted towards recent responses)
-            if (responseCount <= 5)
+            if (!isConnectionActive)
             {
-                // First few responses - simple average
-                averageResponseDuration = ((averageResponseDuration * (responseCount - 1)) + responseDuration) / responseCount;
+                LogError("Cannot test message - WebRTC connection not active");
+                return;
+            }
+            
+            LogMessage("🧪 Testing message send...");
+            SendTextMessage("Hello! This is a test message.");
+        }
+        
+        /// <summary>
+        /// Test method to trigger greeting for debugging
+        /// </summary>
+        [ContextMenu("Test Greeting")]
+        public void TestGreeting()
+        {
+            LogMessage("🧪 Testing greeting system...");
+            TriggerGreeting();
+        }
+        
+        /// <summary>
+        /// Test method to send a greeting in the exact format the AI expects
+        /// </summary>
+        [ContextMenu("Test Direct Greeting")]
+        public void TestDirectGreeting()
+        {
+            if (!isConnectionActive)
+            {
+                LogError("Cannot test direct greeting - WebRTC connection not active");
+                return;
+            }
+            
+            LogMessage("🧪 Testing direct greeting format...");
+            
+            // Create a simple greeting message in the exact format the AI expects
+            var greetingEvent = new JObject
+            {
+                ["type"] = "conversation.item.create",
+                ["item"] = new JObject
+                {
+                    ["type"] = "message",
+                    ["role"] = "user",
+                    ["content"] = new JArray
+                    {
+                        new JObject
+                        {
+                            ["type"] = "input_text",
+                            ["text"] = "Hello! I'm your AI companion. How can I help you today?"
+                        }
+                    }
+                }
+            };
+            
+            string eventJson = greetingEvent.ToString(Newtonsoft.Json.Formatting.None);
+            byte[] eventBytes = Encoding.UTF8.GetBytes(eventJson);
+            
+            if (dataChannel?.ReadyState == RTCDataChannelState.Open)
+            {
+                LogMessage($"📡 Sending direct greeting: {eventBytes.Length} bytes");
+                dataChannel.Send(eventBytes);
+                LogMessage("✅ Direct greeting sent through data channel");
             }
             else
             {
-                // Rolling average with more weight on recent responses
-                averageResponseDuration = (averageResponseDuration * 0.8f) + (responseDuration * 0.2f);
+                LogError("❌ Data channel not ready for direct greeting");
             }
-            
-            LogMessage($"📊 Response timing updated: {responseDuration:F1}s → avg: {averageResponseDuration:F1}s (count: {responseCount})");
         }
         
         /// <summary>
-        /// Get optimal timing for next interaction based on conversation history
-        /// </summary>
-        public float GetOptimalInteractionDelay()
-        {
-            // Base delay on average response time, with some buffer
-            float baseDelay = averageResponseDuration * 0.3f; // 30% of average response time
-            
-            // Clamp to reasonable bounds
-            baseDelay = Mathf.Clamp(baseDelay, 0.5f, 3.0f);
-            
-            LogMessage($"⏱️ Optimal interaction delay: {baseDelay:F1}s (based on {averageResponseDuration:F1}s avg response)");
-            return baseDelay;
-        }
-        
-        /// <summary>
-        /// Check if it's a good time to interject or continue conversation
+        /// Check if it's a good time to interact (simple audio-based check)
         /// </summary>
         public bool IsGoodTimeForInteraction()
         {
             // Don't interrupt if AI is currently responding
-            if (isWaitingForResponse)
+            if (isAIResponding)
             {
+                LogMessage("⏳ AI is currently responding - wait for completion");
                 return false;
             }
             
-            // Check if enough time has passed since last AI response
-            float timeSinceLastResponse = Time.time - lastAIResponseTime;
-            float optimalDelay = GetOptimalInteractionDelay();
-            
-            bool isGoodTime = timeSinceLastResponse >= optimalDelay;
-            
-            if (!isGoodTime)
-            {
-                LogMessage($"⏳ Not yet time for interaction - wait {optimalDelay - timeSinceLastResponse:F1}s more");
-            }
-            
-            return isGoodTime;
+            LogMessage("✅ Good time for interaction - AI is not responding");
+            return true;
         }
         
         /// <summary>
-        /// Send message with natural conversation timing
+        /// Send message with simple audio-based timing check
         /// </summary>
         public void SendTextMessageWithTiming(string message)
         {
             if (!IsGoodTimeForInteraction())
             {
-                LogMessage("⏳ Waiting for optimal timing before sending message...");
-                StartCoroutine(SendMessageWithDelay(message));
+                LogMessage("⏳ Waiting for AI response to complete before sending message...");
+                StartCoroutine(SendMessageWhenReady(message));
                 return;
             }
             
@@ -1231,27 +1426,44 @@ namespace RAGCompanion.Mobile
             SendTextMessage(message);
         }
         
-        private IEnumerator SendMessageWithDelay(string message)
+        private IEnumerator SendMessageWhenReady(string message)
         {
-            float timeSinceLastResponse = Time.time - lastAIResponseTime;
-            float optimalDelay = GetOptimalInteractionDelay();
-            float waitTime = optimalDelay - timeSinceLastResponse;
-            
-            if (waitTime > 0)
+            // Wait for AI response to complete
+            while (isAIResponding)
             {
-                LogMessage($"⏳ Waiting {waitTime:F1}s for natural conversation flow...");
-                yield return new WaitForSeconds(waitTime);
+                yield return new WaitForSeconds(0.1f); // Check every 100ms
             }
             
-            // Check if still good time to send
-            if (IsGoodTimeForInteraction())
+            LogMessage("✅ AI response complete - sending message now");
+            SendTextMessage(message);
+        }
+        
+        /// <summary>
+        /// Timer that waits for silence threshold before marking response complete
+        /// </summary>
+        private IEnumerator ResponseCompletionTimer()
+        {
+            LogMessage($"⏱️ Waiting {silenceThreshold}s of silence before marking response complete...");
+            yield return new WaitForSeconds(silenceThreshold);
+            
+            // Check if new audio started during the silence period
+            if (isAIResponding)
             {
-                LogMessage("✅ Timing is now optimal - sending message");
-                SendTextMessage(message);
-            }
-            else
-            {
-                LogMessage("⚠️ Timing no longer optimal - message cancelled");
+                LogMessage("✅ Silence threshold reached - response marked complete");
+                
+                // Mark response as complete
+                isAIResponding = false;
+                responseCompletionTimer = null;
+                
+                // Update UI to show we're ready
+                if (companionUI != null)
+                {
+                    companionUI.ShowAudioPlaybackIndicator(false);
+                    companionUI.ShowProcessingIndicator(false);
+                    companionUI.UpdateStatusText("Ready - Tap to talk");
+                }
+                
+                LogMessage("🎯 User can now interact - response cycle complete");
             }
         }
         
@@ -1264,6 +1476,9 @@ namespace RAGCompanion.Mobile
         {
             Debug.LogError($"[MobileRealtimeChat_Enhanced] {message}");
         }
+        
+        // Public properties for external access
+        public bool IsConnected => isConnectionActive; // Alias for UI compatibility
         
         private void OnDestroy()
         {
