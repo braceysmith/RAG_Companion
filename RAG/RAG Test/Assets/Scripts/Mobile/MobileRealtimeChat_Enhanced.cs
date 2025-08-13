@@ -3,6 +3,7 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Text;
 using UnityEngine;
+using UnityEngine.Networking;
 using Unity.WebRTC;
 using Newtonsoft.Json.Linq;
 using RAGCompanion.Mobile;
@@ -54,6 +55,13 @@ namespace RAGCompanion.Mobile
         private float lastResponseTime = 0f;
         private int reconnectAttempts = 0;
         private const int MAX_RECONNECT_ATTEMPTS = 3;
+        
+        // Adaptive conversation timing
+        private float lastUserInputTime = 0f;
+        private float lastAIResponseTime = 0f;
+        private float averageResponseDuration = 2.0f; // Track average AI response time
+        private int responseCount = 0;
+        private bool isWaitingForResponse = false;
         
         // Audio transcript tracking
         private StringBuilder currentTranscript = new StringBuilder();
@@ -559,12 +567,113 @@ namespace RAGCompanion.Mobile
         
         private IEnumerator DelayedAutoGreeting()
         {
-            yield return new WaitForSeconds(2f);
+            // Wait for connection to be fully stable before greeting
+            yield return new WaitForSeconds(0.5f); // Minimal delay for connection stability
             
-            if (isConnectionActive && enableAutoGreeting)
+            if (!isConnectionActive)
             {
-                LogMessage("🤝 Sending auto-greeting...");
-                SendTextMessage("Hello! I'm your AI companion. How can I help you today?");
+                LogMessage("⚠️ Connection lost before greeting could be delivered");
+                yield break;
+            }
+            
+            LogMessage("🤝 Generating personalized greeting...");
+            
+            // Get user's name from RAG system using coroutine
+            yield return StartCoroutine(GetUserNameCoroutine((userName) => {
+                // Generate appropriate greeting based on whether we know the name
+                string greetingMessage = GenerateGreetingMessage(userName);
+                
+                LogMessage($"📢 Delivering greeting: {greetingMessage}");
+                
+                // Deliver greeting through normal conversation flow for natural timing
+                SendTextMessage(greetingMessage);
+            }));
+        }
+        
+        private IEnumerator GetUserNameCoroutine(System.Action<string> callback)
+        {
+            string userName = "";
+            
+            if (!enableRAGContext)
+            {
+                LogMessage("RAG not available - cannot retrieve user name");
+                callback?.Invoke("");
+                yield break;
+            }
+            
+            // Try to get user profile from server
+            using (UnityEngine.Networking.UnityWebRequest request = UnityEngine.Networking.UnityWebRequest.Get($"{ragApiUrl}/companion/{userId}/profile"))
+            {
+                yield return request.SendWebRequest();
+                
+                if (request.result == UnityEngine.Networking.UnityWebRequest.Result.Success)
+                {
+                    try
+                    {
+                        var response = Newtonsoft.Json.JsonConvert.DeserializeObject<System.Collections.Generic.Dictionary<string, object>>(request.downloadHandler.text);
+                        
+                        // Check for simple profile structure: {"profile": {"name": "Bracey"}, "has_name": true}
+                        if (response.ContainsKey("profile") && response["profile"] is Newtonsoft.Json.Linq.JObject profile)
+                        {
+                            string name = profile["name"]?.ToString();
+                            if (!string.IsNullOrEmpty(name))
+                            {
+                                LogMessage($"✅ Found user name: {name}");
+                                userName = name.Split(' ')[0]; // Use first name only
+                            }
+                        }
+                        // Also check for has_name flag to confirm name validity
+                        else if (response.ContainsKey("has_name") && response["has_name"].ToString().ToLower() == "false")
+                        {
+                            LogMessage("Profile indicates user has no stored name");
+                        }
+                    }
+                    catch (System.Exception parseEx)
+                    {
+                        LogMessage($"Error parsing user profile response: {parseEx.Message}");
+                    }
+                }
+                else
+                {
+                    LogMessage($"Failed to get user profile: {request.error}");
+                }
+            }
+            
+            if (string.IsNullOrEmpty(userName))
+            {
+                LogMessage("No user name found in profile");
+            }
+            
+            callback?.Invoke(userName);
+        }
+        
+        private string GenerateGreetingMessage(string userName)
+        {
+            if (!string.IsNullOrEmpty(userName))
+            {
+                // Personalized greeting with known name
+                string[] personalizedGreetings = {
+                    $"Hello {userName}! Great to see you again. How can I help you today?",
+                    $"Hi {userName}! Welcome back. What would you like to talk about?",
+                    $"Hey {userName}! I'm here and ready to chat. What's on your mind?",
+                    $"Good to see you, {userName}! How are you doing today?",
+                    $"Hello {userName}! I'm here to help. What can I do for you?"
+                };
+                
+                return personalizedGreetings[UnityEngine.Random.Range(0, personalizedGreetings.Length)];
+            }
+            else
+            {
+                // Generic greeting that asks for name
+                string[] introductoryGreetings = {
+                    "Hello! I'm your AI companion. I'm here to help with conversations, reminders, and more. What's your name?",
+                    "Hi there! Great to meet you. I'm your personal AI assistant. Could you tell me your name so I can address you properly?",
+                    "Welcome! I'm excited to be your AI companion. I can help with conversations and reminders. What should I call you?",
+                    "Hello! I'm here to chat, help with reminders, and assist you. What's your name so we can get better acquainted?",
+                    "Hi! I'm your AI companion, ready to help with whatever you need. Could you share your name with me?"
+                };
+                
+                return introductoryGreetings[UnityEngine.Random.Range(0, introductoryGreetings.Length)];
             }
         }
         
@@ -646,6 +755,14 @@ namespace RAGCompanion.Mobile
         {
             LogMessage("Audio response delta received - AI is speaking");
             
+            // Track response timing for adaptive conversation flow
+            if (!isWaitingForResponse)
+            {
+                isWaitingForResponse = true;
+                lastAIResponseTime = Time.time;
+                LogMessage("🎯 AI response started - tracking timing");
+            }
+            
             // Reset safety timeout when audio activity is detected
             if (enableEnhancedAudio && enhancedAudioHandler != null)
             {
@@ -671,6 +788,15 @@ namespace RAGCompanion.Mobile
         private void HandleAudioResponseDone(JObject message)
         {
             LogMessage("Audio response complete");
+            
+            // Calculate adaptive response timing
+            if (isWaitingForResponse)
+            {
+                float responseDuration = Time.time - lastAIResponseTime;
+                UpdateResponseTiming(responseDuration);
+                isWaitingForResponse = false;
+                LogMessage($"⏱️ AI response completed in {responseDuration:F1}s (avg: {averageResponseDuration:F1}s)");
+            }
             
             // Update UI to show we're ready
             if (companionUI != null)
@@ -746,6 +872,9 @@ namespace RAGCompanion.Mobile
                 LogError("Cannot send message - connection not active");
                 return;
             }
+            
+            // Track user input timing for adaptive conversation flow
+            lastUserInputTime = Time.time;
             
             if (enableEnhancedAudio && enhancedAudioHandler != null)
             {
@@ -933,6 +1062,197 @@ namespace RAGCompanion.Mobile
                 messageBufferCount = 0,
                 bufferUsagePercentage = 0f
             };
+        }
+        
+        // Trigger AI to speak a message directly without full conversation processing
+        public void TriggerDirectAIMessage(string message)
+        {
+            LogMessage($"🗣️ Triggering direct AI message: {message}");
+            
+            if (!isConnectionActive)
+            {
+                LogError("Cannot deliver direct message - no active connection");
+                
+                // Fall back to UI display only
+                if (companionUI != null)
+                {
+                    companionUI.AddMessage(message, "assistant", true);
+                    companionUI.UpdateStatusText("Message delivered (no audio connection)");
+                }
+                return;
+            }
+            
+            try
+            {
+                // Create a simple response event to make AI speak the message directly
+                var responseEvent = new
+                {
+                    type = "response.create",
+                    response = new
+                    {
+                        modalities = new[] { "text", "audio" },
+                        instructions = $"Simply say this message exactly as written, in a warm and friendly tone: '{message}'"
+                    }
+                };
+                
+                string responseJson = Newtonsoft.Json.JsonConvert.SerializeObject(responseEvent);
+                
+                // Send through data channel
+                if (dataChannel != null && dataChannel.ReadyState == RTCDataChannelState.Open)
+                {
+                    byte[] responseBytes = Encoding.UTF8.GetBytes(responseJson);
+                    dataChannel.Send(responseBytes);
+                    
+                    LogMessage($"✅ Sent direct AI message through data channel");
+                    
+                    // Update UI to show AI is speaking
+                    if (companionUI != null)
+                    {
+                        companionUI.AddMessage(message, "assistant", true);
+                        companionUI.ShowAudioPlaybackIndicator(true);
+                        companionUI.UpdateStatusText("AI is speaking...");
+                    }
+                }
+                else
+                {
+                    LogError("Data channel not available for direct message delivery");
+                    
+                    // Fall back to UI display
+                    if (companionUI != null)
+                    {
+                        companionUI.AddMessage(message, "assistant", true);
+                        companionUI.UpdateStatusText("Message delivered (audio unavailable)");
+                    }
+                }
+            }
+            catch (System.Exception e)
+            {
+                LogError($"Failed to trigger direct AI message: {e.Message}");
+                
+                // Fall back to UI display
+                if (companionUI != null)
+                {
+                    companionUI.AddMessage(message, "assistant", true);
+                    companionUI.UpdateStatusText("Message delivered (fallback mode)");
+                }
+            }
+        }
+        
+        /// <summary>
+        /// Manually trigger a greeting - useful for testing or re-greeting
+        /// </summary>
+        public void TriggerGreeting()
+        {
+            if (!isConnectionActive)
+            {
+                LogError("Cannot trigger greeting - WebRTC connection not active");
+                return;
+            }
+            
+            LogMessage("🤝 Manual greeting triggered");
+            StartCoroutine(DelayedAutoGreeting());
+        }
+        
+        /// <summary>
+        /// Update response timing statistics for adaptive conversation flow
+        /// </summary>
+        private void UpdateResponseTiming(float responseDuration)
+        {
+            responseCount++;
+            
+            // Calculate rolling average (weighted towards recent responses)
+            if (responseCount <= 5)
+            {
+                // First few responses - simple average
+                averageResponseDuration = ((averageResponseDuration * (responseCount - 1)) + responseDuration) / responseCount;
+            }
+            else
+            {
+                // Rolling average with more weight on recent responses
+                averageResponseDuration = (averageResponseDuration * 0.8f) + (responseDuration * 0.2f);
+            }
+            
+            LogMessage($"📊 Response timing updated: {responseDuration:F1}s → avg: {averageResponseDuration:F1}s (count: {responseCount})");
+        }
+        
+        /// <summary>
+        /// Get optimal timing for next interaction based on conversation history
+        /// </summary>
+        public float GetOptimalInteractionDelay()
+        {
+            // Base delay on average response time, with some buffer
+            float baseDelay = averageResponseDuration * 0.3f; // 30% of average response time
+            
+            // Clamp to reasonable bounds
+            baseDelay = Mathf.Clamp(baseDelay, 0.5f, 3.0f);
+            
+            LogMessage($"⏱️ Optimal interaction delay: {baseDelay:F1}s (based on {averageResponseDuration:F1}s avg response)");
+            return baseDelay;
+        }
+        
+        /// <summary>
+        /// Check if it's a good time to interject or continue conversation
+        /// </summary>
+        public bool IsGoodTimeForInteraction()
+        {
+            // Don't interrupt if AI is currently responding
+            if (isWaitingForResponse)
+            {
+                return false;
+            }
+            
+            // Check if enough time has passed since last AI response
+            float timeSinceLastResponse = Time.time - lastAIResponseTime;
+            float optimalDelay = GetOptimalInteractionDelay();
+            
+            bool isGoodTime = timeSinceLastResponse >= optimalDelay;
+            
+            if (!isGoodTime)
+            {
+                LogMessage($"⏳ Not yet time for interaction - wait {optimalDelay - timeSinceLastResponse:F1}s more");
+            }
+            
+            return isGoodTime;
+        }
+        
+        /// <summary>
+        /// Send message with natural conversation timing
+        /// </summary>
+        public void SendTextMessageWithTiming(string message)
+        {
+            if (!IsGoodTimeForInteraction())
+            {
+                LogMessage("⏳ Waiting for optimal timing before sending message...");
+                StartCoroutine(SendMessageWithDelay(message));
+                return;
+            }
+            
+            // Send immediately if timing is good
+            SendTextMessage(message);
+        }
+        
+        private IEnumerator SendMessageWithDelay(string message)
+        {
+            float timeSinceLastResponse = Time.time - lastAIResponseTime;
+            float optimalDelay = GetOptimalInteractionDelay();
+            float waitTime = optimalDelay - timeSinceLastResponse;
+            
+            if (waitTime > 0)
+            {
+                LogMessage($"⏳ Waiting {waitTime:F1}s for natural conversation flow...");
+                yield return new WaitForSeconds(waitTime);
+            }
+            
+            // Check if still good time to send
+            if (IsGoodTimeForInteraction())
+            {
+                LogMessage("✅ Timing is now optimal - sending message");
+                SendTextMessage(message);
+            }
+            else
+            {
+                LogMessage("⚠️ Timing no longer optimal - message cancelled");
+            }
         }
         
         private void LogMessage(string message)

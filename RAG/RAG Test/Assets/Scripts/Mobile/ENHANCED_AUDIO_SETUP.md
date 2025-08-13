@@ -66,6 +66,7 @@ Audio Configuration:
 RAG Integration:
 - Enable RAG Context: true
 - Enable Auto Greeting: true
+- Greeting Delay: 1.5 seconds (adjustable timing)
 ```
 
 ### Step 4: Update Your UI Integration
@@ -80,6 +81,15 @@ chat.StopRecording();
 
 // Send text messages
 chat.SendTextMessage("Hello, AI!");
+
+// Send with natural timing (prevents interruptions)
+chat.SendTextMessageWithTiming("Hello, AI!");
+
+// Check if it's a good time to interact
+bool canInteract = chat.IsGoodTimeForInteraction();
+
+// Get optimal timing for next interaction
+float optimalDelay = chat.GetOptimalInteractionDelay();
 
 // Check connection status
 bool isConnected = chat.IsConnected();
@@ -115,6 +125,18 @@ Debug.Log($"Buffer usage: {status.bufferUsagePercentage}%");
     "silence_duration_ms": 2000 // 2 seconds silence detection
 }
 ```
+
+### 5. Adaptive Conversation Timing
+- **Dynamic Response Tracking**: Monitors actual AI response duration
+- **Smart Interaction Delays**: Calculates optimal timing based on conversation history
+- **Natural Flow**: Prevents interruptions and maintains conversation rhythm
+- **Learning System**: Adapts timing based on user's conversation patterns
+
+### 6. Enhanced Greeting System
+- **Personalized Greetings**: Checks for existing user names from RAG system
+- **Natural Timing**: Minimal delay (0.5s) for connection stability only
+- **Fallback Support**: Works even when RAG context is unavailable
+- **Conversation Integration**: Greetings flow naturally through normal conversation
 
 ## Testing the Enhanced System
 
