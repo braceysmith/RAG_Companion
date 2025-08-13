@@ -203,23 +203,32 @@ Key behaviors:
                         }
                         await openai_ws.send(json.dumps(error_response))
                 
-                # Create bidirectional message routing
+                # Import enhanced audio handler
+                from companion_system.audio_streaming import enhanced_audio_handler
+                
+                # Create bidirectional message routing with enhanced streaming
                 async def forward_to_openai():
-                    """Forward messages from client to OpenAI"""
+                    """Forward messages from client to OpenAI with enhanced streaming"""
                     try:
                         async for message in websocket_connection:
                             if isinstance(message, str):
                                 data = json.loads(message)
                                 event_type = data.get('type', 'unknown')
                                 logger.info(f"Client -> OpenAI: {event_type}")
-                                await openai_ws.send(message)
+                                
+                                # Use enhanced message sending for large messages
+                                if len(message) > 50000:  # 50KB threshold
+                                    await enhanced_audio_handler.send_message_with_flow_control(
+                                        message, event_type, openai_ws
+                                    )
+                                else:
+                                    await openai_ws.send(message)
+                                    
                             elif isinstance(message, bytes):
-                                # Handle binary audio data - convert to official format
-                                audio_event = {
-                                    "type": "input_audio_buffer.append",
-                                    "audio": base64.b64encode(message).decode()
-                                }
-                                await openai_ws.send(json.dumps(audio_event))
+                                # Handle binary audio data with enhanced streaming
+                                await enhanced_audio_handler.send_audio_with_flow_control(
+                                    message, openai_ws
+                                )
                     except websockets.exceptions.ConnectionClosed:
                         logger.info("Client connection closed")
                     except Exception as e:

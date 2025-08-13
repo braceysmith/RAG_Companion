@@ -3009,6 +3009,26 @@ async def initialize_needs_tables():
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to initialize needs tables: {str(e)}")
 
+@app.get("/audio/status")
+async def get_audio_streaming_status():
+    """Get current audio streaming system status"""
+    try:
+        from companion_system.audio_streaming import enhanced_audio_handler
+        status = enhanced_audio_handler.get_system_status()
+        
+        return {
+            "status": "healthy",
+            "audio_streaming": status,
+            "recommendations": []
+        }
+        
+    except Exception as e:
+        return {
+            "status": "error",
+            "error": str(e),
+            "audio_streaming": None
+        }
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8077, reload=True)

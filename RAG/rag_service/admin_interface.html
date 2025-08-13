@@ -463,6 +463,14 @@
             </div>
 
             <div class="card">
+                <h3>🎵 Audio Streaming Status</h3>
+                <div class="alert alert-info" id="audioAlert"></div>
+                <p>Check the status of the enhanced audio streaming system</p>
+                <button class="btn btn-primary" onclick="checkAudioStatus()">🎵 Check Audio Status</button>
+                <div id="audioStatusDisplay" style="margin-top: 15px; display: none;"></div>
+            </div>
+
+            <div class="card">
                 <h3>Clear User Data</h3>
                 <div class="alert alert-success" id="dataAlert"></div>
                 <div class="form-group">
@@ -748,6 +756,39 @@
             } catch (error) {
                 document.getElementById('needsInitStatus').textContent = '❌ Failed';
                 showAlert(`Failed to initialize needs tables: ${error.message}`, 'danger');
+            }
+        }
+
+        async function checkAudioStatus() {
+            try {
+                const result = await apiCall('/audio/status');
+                
+                const statusDiv = document.getElementById('audioStatusDisplay');
+                statusDiv.style.display = 'block';
+                
+                if (result.status === 'healthy') {
+                    const audioStatus = result.audio_streaming;
+                    
+                    statusDiv.innerHTML = `
+                        <div style="background: #f8f9fa; padding: 15px; border-radius: 8px; font-family: monospace; font-size: 12px;">
+                            <h4>🎵 Audio Streaming Status</h4>
+                            <div><strong>Flow Control:</strong> ${audioStatus.flow_control.is_flow_controlled ? '🟡 Active' : '🟢 Normal'}</div>
+                            <div><strong>Buffer Usage:</strong> ${Math.round(audioStatus.flow_control.current_buffer_size / 1024)}KB / ${Math.round(audioStatus.flow_control.max_buffer_size / 1024)}KB</div>
+                            <div><strong>Audio Buffer:</strong> ${Math.round(audioStatus.audio_buffer.buffer_percentage)}% full</div>
+                            <div><strong>Active Streams:</strong> ${audioStatus.stream_manager.active_streams}</div>
+                            <div><strong>Pending Messages:</strong> ${audioStatus.flow_control.pending_messages}</div>
+                        </div>
+                    `;
+                    
+                    showAlert('Audio streaming system is healthy', 'success');
+                } else {
+                    statusDiv.innerHTML = `<div style="color: red;">❌ Audio system error: ${result.error}</div>`;
+                    showAlert('Audio system has errors', 'danger');
+                }
+                
+            } catch (error) {
+                document.getElementById('audioStatusDisplay').innerHTML = `<div style="color: red;">❌ Failed to check audio status: ${error.message}</div>`;
+                showAlert(`Failed to check audio status: ${error.message}`, 'danger');
             }
         }
 
