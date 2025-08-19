@@ -2641,9 +2641,9 @@ GameObject:
   - component: {fileID: 630904268}
   - component: {fileID: 630904267}
   - component: {fileID: 630904266}
-  - component: {fileID: 630904271}
   - component: {fileID: 630904273}
   - component: {fileID: 630904272}
+  - component: {fileID: 630904274}
   m_Layer: 0
   m_Name: RAG System Controller
   m_TagString: Untagged
@@ -2751,30 +2751,6 @@ Transform:
   m_Children: []
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
---- !u!114 &630904271
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 630904265}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 1a251cd23d11d4e078a101fc7d46de0c, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
-  realtimeModel: gpt-4o-realtime-preview-2024-10-01
-  iceServers: stun:stun.l.google.com:19302,stun:stun1.l.google.com:19302
-  ragApiUrl: https://ragcompanion-production-bf25.up.railway.app
-  userId: mobile-bracey01
-  enableRAGContext: 1
-  maxRAGResults: 3
-  autoConnectOnStart: 1
-  autoConnectDelay: 2
-  enableAutoGreeting: 1
-  greetingDelay: 1.5
-  enableReminders: 1
-  reminderManager: {fileID: 630904272}
 --- !u!114 &630904272
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -2812,6 +2788,30 @@ MonoBehaviour:
   timeOffsetSeconds: 0
   isSynced: 0
   lastSyncTime: 
+--- !u!114 &630904274
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 630904265}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 1a251cd23d11d4e078a101fc7d46de0c, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  realtimeModel: gpt-4o-realtime-preview-2024-10-01
+  iceServers: stun:stun.l.google.com:19302,stun:stun1.l.google.com:19302
+  ragApiUrl: https://ragcompanion-production-bf25.up.railway.app
+  userId: mobile-bracey02
+  enableRAGContext: 1
+  maxRAGResults: 3
+  autoConnectOnStart: 1
+  autoConnectDelay: 2
+  enableAutoGreeting: 1
+  greetingDelay: 1.5
+  enableReminders: 1
+  reminderManager: {fileID: 630904272}
 --- !u!1 &863663166
 GameObject:
   m_ObjectHideFlags: 0
@@ -3811,19 +3811,7 @@ MonoBehaviour:
   m_TargetGraphic: {fileID: 1053949572}
   m_OnClick:
     m_PersistentCalls:
-      m_Calls:
-      - m_Target: {fileID: 630904271}
-        m_TargetAssemblyTypeName: MobileRealtimeChat, Assembly-CSharp
-        m_MethodName: TestAIResponse
-        m_Mode: 1
-        m_Arguments:
-          m_ObjectArgument: {fileID: 0}
-          m_ObjectArgumentAssemblyTypeName: UnityEngine.Object, UnityEngine
-          m_IntArgument: 0
-          m_FloatArgument: 0
-          m_StringArgument: 
-          m_BoolArgument: 0
-        m_CallState: 2
+      m_Calls: []
 --- !u!114 &1053949572
 MonoBehaviour:
   m_ObjectHideFlags: 0

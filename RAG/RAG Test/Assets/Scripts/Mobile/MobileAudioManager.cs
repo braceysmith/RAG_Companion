@@ -22,7 +22,7 @@ public class MobileAudioManager : MonoBehaviour
     [SerializeField] private bool enableVAD = true;
     [SerializeField] private float vadThreshold = 0.02f;
     [SerializeField] private float vadMinDuration = 0.5f;
-    [SerializeField] private float vadMaxSilence = 2.0f;
+    [SerializeField] private float vadMaxSilence = 5.0f; // Increased from 2.0f to 5.0f to prevent premature cutoffs
     
     // Recording state
     private bool isRecording = false;

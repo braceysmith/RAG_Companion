@@ -2206,8 +2206,8 @@ public class MobileRealtimeChat : MonoBehaviour
                 {
                     ["type"] = "server_vad",
                     ["threshold"] = 0.5,
-                    ["prefix_padding_ms"] = 300,
-                    ["silence_duration_ms"] = 2000
+                    ["prefix_padding_ms"] = 1000, // Increased from 300ms to 1000ms for better audio continuity
+                    ["silence_duration_ms"] = 5000 // Increased from 2000ms to 5000ms to prevent premature cutoffs
                 },
                 ["tool_choice"] = "auto",
                 ["tools"] = new JArray
