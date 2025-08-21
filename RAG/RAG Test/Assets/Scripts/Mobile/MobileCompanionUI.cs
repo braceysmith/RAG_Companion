@@ -631,20 +631,7 @@ public class MobileCompanionUI : MonoBehaviour
     
     private void TriggerHapticFeedback()
     {
-#if UNITY_ANDROID && !UNITY_EDITOR
-        // Android haptic feedback
-        AndroidJavaClass unityPlayer = new AndroidJavaClass("com.unity3d.player.UnityPlayer");
-        AndroidJavaObject currentActivity = unityPlayer.GetStatic<AndroidJavaObject>("currentActivity");
-        AndroidJavaObject vibrator = currentActivity.Call<AndroidJavaObject>("getSystemService", "vibrator");
-        
-        if (vibrator != null)
-        {
-            vibrator.Call("vibrate", 50); // Short vibration
-        }
-#elif UNITY_IOS && !UNITY_EDITOR
-        // iOS haptic feedback
-        Handheld.Vibrate();
-#endif
+        PlatformConfig.TriggerHapticFeedback(0.5f, 0.05f);
     }
     
     private void OnMessageInputSubmitted(string message)

@@ -6,11 +6,13 @@ using UnityEngine.Networking;
 using TMPro;
 using Newtonsoft.Json;
 
-#if UNITY_ANDROID && !UNITY_EDITOR && MOBILE_NOTIFICATIONS
+// Mobile notifications are only available when the Unity Mobile Notifications package is installed
+// These imports are wrapped in platform-specific defines to prevent compilation errors
+#if UNITY_ANDROID && !UNITY_EDITOR && UNITY_MOBILE_NOTIFICATIONS
 using Unity.Notifications.Android;
 #endif
 
-#if UNITY_IOS && !UNITY_EDITOR && MOBILE_NOTIFICATIONS
+#if UNITY_IOS && !UNITY_EDITOR && UNITY_MOBILE_NOTIFICATIONS
 using Unity.Notifications.iOS;
 #endif
 
@@ -329,24 +331,41 @@ public class ReminderManager : MonoBehaviour
     
     private void InitializeMobileNotifications()
     {
-#if UNITY_ANDROID && !UNITY_EDITOR && MOBILE_NOTIFICATIONS
+#if UNITY_ANDROID && !UNITY_EDITOR && UNITY_MOBILE_NOTIFICATIONS
         // Android notification setup
-        var channel = new AndroidNotificationChannel()
+        try
         {
-            Id = "reminder_channel",
-            Name = "AI Reminders",
-            Importance = Importance.High,
-            Description = "Notifications for AI reminders",
-        };
-        AndroidNotificationCenter.RegisterNotificationChannel(channel);
-        
-#elif UNITY_IOS && !UNITY_EDITOR && MOBILE_NOTIFICATIONS
+            var channel = new AndroidNotificationChannel()
+            {
+                Id = "reminder_channel",
+                Name = "AI Reminders",
+                Importance = Importance.High,
+                Description = "Notifications for AI reminders",
+            };
+            AndroidNotificationCenter.RegisterNotificationChannel(channel);
+            Debug.Log("📱 Android notifications initialized");
+        }
+        catch (System.Exception ex)
+        {
+            Debug.LogWarning($"📱 Android notifications failed: {ex.Message}");
+        }
+#elif UNITY_IOS && !UNITY_EDITOR && UNITY_MOBILE_NOTIFICATIONS
         // iOS notification setup
-        iOSNotificationCenter.RequestAuthorizationAsync(
-            AuthorizationOption.Alert |
-            AuthorizationOption.Badge |
-            AuthorizationOption.Sound
-        );
+        try
+        {
+            iOSNotificationCenter.RequestAuthorizationAsync(
+                AuthorizationOption.Alert |
+                AuthorizationOption.Badge |
+                AuthorizationOption.Sound
+            );
+            Debug.Log("📱 iOS notifications initialized");
+        }
+        catch (System.Exception ex)
+        {
+            Debug.LogWarning($"📱 iOS notifications failed: {ex.Message}");
+        }
+#else
+        Debug.Log("📱 Mobile notifications not available on this platform or package not installed");
 #endif
         
         Debug.Log("📱 Mobile notifications initialized");
@@ -354,36 +373,55 @@ public class ReminderManager : MonoBehaviour
     
     private void SendMobileNotification(ReminderData reminder)
     {
-#if UNITY_ANDROID && !UNITY_EDITOR && MOBILE_NOTIFICATIONS
-        var notification = new AndroidNotification();
-        notification.Title = "AI Reminder";
-        notification.Text = reminder.content;
-        notification.SmallIcon = "icon_small";
-        notification.LargeIcon = "icon_large";
-        notification.FireTime = System.DateTime.Now;
-        
-        AndroidNotificationCenter.SendNotification(notification, "reminder_channel");
-        
-#elif UNITY_IOS && !UNITY_EDITOR && MOBILE_NOTIFICATIONS
-        var notification = new iOSNotification()
+#if UNITY_ANDROID && !UNITY_EDITOR && UNITY_MOBILE_NOTIFICATIONS
+        try
         {
-            Title = "AI Reminder",
-            Body = reminder.content,
-            ShowInForeground = false,
-            ForegroundPresentationOption = PresentationOption.Alert | PresentationOption.Sound,
-            CategoryIdentifier = "reminder_category",
-            ThreadIdentifier = "reminder_thread",
-            Trigger = new iOSNotificationTimeIntervalTrigger()
+            var notification = new AndroidNotification();
+            notification.Title = "AI Reminder";
+            notification.Text = reminder.content;
+            notification.SmallIcon = "icon_small";
+            notification.LargeIcon = "icon_large";
+            notification.FireTime = System.DateTime.Now;
+            
+            AndroidNotificationCenter.SendNotification(notification, "reminder_channel");
+            Debug.Log($"📱 Sent Android notification: {reminder.content}");
+        }
+        catch (System.Exception ex)
+        {
+            Debug.LogWarning($"📱 Android notification failed: {ex.Message}");
+        }
+#elif UNITY_IOS && !UNITY_EDITOR && UNITY_MOBILE_NOTIFICATIONS
+        try
+        {
+            var notification = new iOSNotification()
             {
-                TimeInterval = new System.TimeSpan(0, 0, 1),
-                Repeats = false
-            }
-        };
+                Title = "AI Reminder",
+                Body = reminder.content,
+                ShowInForeground = false,
+                ForegroundPresentationOption = PresentationOption.Alert | PresentationOption.Sound,
+                CategoryIdentifier = "reminder_category",
+                ThreadIdentifier = "reminder_thread",
+                Trigger = new iOSNotificationTimeIntervalTrigger()
+                {
+                    TimeInterval = new System.TimeSpan(0, 0, 1),
+                    Repeats = false
+                }
+            };
+            
+            iOSNotificationCenter.ScheduleNotification(notification);
+            Debug.Log($"📱 Sent iOS notification: {reminder.content}");
+        }
+        catch (System.Exception ex)
+        {
+            Debug.LogWarning($"📱 iOS notification failed: {ex.Message}");
+        }
+#else
+        // Fallback for unsupported platforms or when Unity Mobile Notifications package is not installed
+        Debug.Log($"📱 Notification (fallback): {reminder.content}");
         
-        iOSNotificationCenter.ScheduleNotification(notification);
+        // Use cross-platform notification as fallback
+        PlatformConfig.ShowCrossPlatformNotification("AI Reminder", reminder.content);
 #endif
-        
-        Debug.Log($"📱 Sent mobile notification: {reminder.content}");
     }
     
     private IEnumerator DeliverRemindersThroughAI()

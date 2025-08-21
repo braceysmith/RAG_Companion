@@ -45,6 +45,9 @@ public class MobileNotificationManager : MonoBehaviour
         InitializeAndroidNotifications();
 #elif UNITY_IOS && !UNITY_EDITOR
         InitializeiOSNotifications();
+#else
+        // Initialize for other platforms (Quest, PC, etc.)
+        InitializeCrossPlatformNotifications();
 #endif
         
         LogMessage("Mobile notification manager initialized");
@@ -74,6 +77,7 @@ public class MobileNotificationManager : MonoBehaviour
     private void InitializeAndroidNotifications()
     {
         // Placeholder for non-Android platforms
+        LogMessage("Android notifications not available on this platform");
     }
 #endif
     
@@ -96,8 +100,15 @@ public class MobileNotificationManager : MonoBehaviour
     private void InitializeiOSNotifications()
     {
         // Placeholder for non-iOS platforms
+        LogMessage("iOS notifications not available on this platform");
     }
 #endif
+    
+    private void InitializeCrossPlatformNotifications()
+    {
+        // Initialize for Quest, PC, and other platforms
+        LogMessage("Cross-platform notifications initialized");
+    }
     
     public void ShowNotification(string title, string message, string type = "default")
     {
@@ -128,7 +139,7 @@ public class MobileNotificationManager : MonoBehaviour
 #elif UNITY_IOS && !UNITY_EDITOR
             ShowiOSNotification(title, message, type);
 #else
-            ShowEditorNotification(title, message, type);
+            ShowCrossPlatformNotification(title, message, type);
 #endif
             
             // Track notification
@@ -149,40 +160,50 @@ public class MobileNotificationManager : MonoBehaviour
     private void ShowAndroidNotification(string title, string message, string type)
     {
         // Android notification implementation
-        AndroidJavaClass unityPlayer = new AndroidJavaClass("com.unity3d.player.UnityPlayer");
-        AndroidJavaObject activity = unityPlayer.GetStatic<AndroidJavaObject>("currentActivity");
-        
-        // Create notification
-        AndroidJavaClass notificationBuilderClass = new AndroidJavaClass("android.app.Notification$Builder");
-        AndroidJavaObject notificationBuilder = new AndroidJavaObject("android.app.Notification$Builder", activity);
-        
-        // Configure notification
-        notificationBuilder.Call<AndroidJavaObject>("setContentTitle", title);
-        notificationBuilder.Call<AndroidJavaObject>("setContentText", message);
-        notificationBuilder.Call<AndroidJavaObject>("setSmallIcon", android.R.drawable.ic_dialog_info);
-        
-        // Add sound if enabled
-        if (enableSoundAlerts)
+        try
         {
-            notificationBuilder.Call<AndroidJavaObject>("setDefaults", 1); // DEFAULT_SOUND
+            AndroidJavaClass unityPlayer = new AndroidJavaClass("com.unity3d.player.UnityPlayer");
+            AndroidJavaObject activity = unityPlayer.GetStatic<AndroidJavaObject>("currentActivity");
+            
+            // Create notification
+            AndroidJavaClass notificationBuilderClass = new AndroidJavaClass("android.app.Notification$Builder");
+            AndroidJavaObject notificationBuilder = new AndroidJavaObject("android.app.Notification$Builder", activity);
+            
+            // Configure notification
+            notificationBuilder.Call<AndroidJavaObject>("setContentTitle", title);
+            notificationBuilder.Call<AndroidJavaObject>("setContentText", message);
+            // Use a default icon - you may need to provide your own icon resource
+            notificationBuilder.Call<AndroidJavaObject>("setSmallIcon", 0x1080093); // Default info icon
+            
+            // Add sound if enabled
+            if (enableSoundAlerts)
+            {
+                notificationBuilder.Call<AndroidJavaObject>("setDefaults", 1); // DEFAULT_SOUND
+            }
+            
+            // Add vibration if enabled
+            if (enableVibration)
+            {
+                notificationBuilder.Call<AndroidJavaObject>("setVibrate", new long[] { 0, 300, 100, 300 });
+            }
+            
+            // Build and show notification
+            AndroidJavaObject notification = notificationBuilder.Call<AndroidJavaObject>("build");
+            AndroidJavaObject notificationManager = activity.Call<AndroidJavaObject>("getSystemService", "notification");
+            notificationManager.Call("notify", 1, notification);
         }
-        
-        // Add vibration if enabled
-        if (enableVibration)
+        catch (Exception ex)
         {
-            notificationBuilder.Call<AndroidJavaObject>("setVibrate", new long[] { 0, 300, 100, 300 });
+            LogError($"Android notification failed: {ex.Message}");
+            // Fallback to cross-platform notification
+            ShowCrossPlatformNotification(title, message, type);
         }
-        
-        // Build and show notification
-        AndroidJavaObject notification = notificationBuilder.Call<AndroidJavaObject>("build");
-        AndroidJavaObject notificationManager = activity.Call<AndroidJavaObject>("getSystemService", "notification");
-        notificationManager.Call("notify", 1, notification);
     }
 #else
     private void ShowAndroidNotification(string title, string message, string type)
     {
         // Placeholder for non-Android platforms
-        ShowEditorNotification(title, message, type);
+        ShowCrossPlatformNotification(title, message, type);
     }
 #endif
     
@@ -207,9 +228,34 @@ public class MobileNotificationManager : MonoBehaviour
     private void ShowiOSNotification(string title, string message, string type)
     {
         // Placeholder for non-iOS platforms
-        ShowEditorNotification(title, message, type);
+        ShowCrossPlatformNotification(title, message, type);
     }
 #endif
+    
+    private void ShowCrossPlatformNotification(string title, string message, string type)
+    {
+        // Cross-platform notification for Quest, PC, etc.
+        Debug.Log($"[NOTIFICATION] {title}: {message}");
+        
+        // Simple visual feedback
+        if (Application.isEditor)
+        {
+            // Could show a simple UI notification here
+        }
+        
+        // Haptic feedback for Quest
+        if (enableVibration && Application.platform == RuntimePlatform.Android)
+        {
+            try
+            {
+                Handheld.Vibrate();
+            }
+            catch (Exception ex)
+            {
+                LogError($"Vibration failed: {ex.Message}");
+            }
+        }
+    }
     
     private void ShowEditorNotification(string title, string message, string type)
     {

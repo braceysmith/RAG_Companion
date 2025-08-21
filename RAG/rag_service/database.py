@@ -5,6 +5,7 @@ from psycopg import sql
 from typing import List, Dict, Any, Optional
 import numpy as np
 # Note: register_vector is not needed for async connections in newer versions
+from datetime import datetime
 
 class RAGDatabase:
     def __init__(self, db_url: str):
@@ -1041,3 +1042,188 @@ class RAGDatabase:
         except Exception as e:
             print(f"❌ Error getting conversation turn: {e}")
             return None
+    
+    async def get_session_summary(self, session_id: str) -> Optional[Dict[str, Any]]:
+        """Get a summary of a conversation session"""
+        try:
+            async with await psycopg.AsyncConnection.connect(self.db_url) as conn:
+                async with conn.cursor() as cur:
+                    await cur.execute("""
+                        SELECT session_id, user_id, started_at, ended_at, metadata
+                        FROM conversation_sessions 
+                        WHERE session_id = %(session_id)s
+                    """, {"session_id": session_id})
+                    
+                    row = await cur.fetchone()
+                    if row:
+                        return {
+                            "session_id": row[0],
+                            "user_id": row[1],
+                            "started_at": row[2],
+                            "ended_at": row[3],
+                            "metadata": row[4]
+                        }
+                    return None
+        except Exception as e:
+            print(f"❌ Error getting session summary: {e}")
+            return None
+    
+    async def store_conversation_session(self, session_id: str, user_id: str, metadata: Dict[str, Any] = None):
+        """Store a new conversation session"""
+        try:
+            async with await psycopg.AsyncConnection.connect(self.db_url) as conn:
+                async with conn.cursor() as cur:
+                    await cur.execute("""
+                        INSERT INTO conversation_sessions (
+                            session_id, user_id, started_at, metadata
+                        ) VALUES (
+                            %(session_id)s, %(user_id)s, NOW(), %(metadata)s
+                        )
+                    """, {
+                        "session_id": session_id,
+                        "user_id": user_id,
+                        "metadata": metadata or {}
+                    })
+                    await conn.commit()
+                    print(f"✅ Stored conversation session: {session_id}")
+                    return True
+        except Exception as e:
+            print(f"❌ Error storing conversation session: {e}")
+            return False
+    
+    async def update_conversation_session(self, session_id: str, ended_at: datetime = None, metadata: Dict[str, Any] = None):
+        """Update a conversation session"""
+        try:
+            async with await psycopg.AsyncConnection.connect(self.db_url) as conn:
+                async with conn.cursor() as cur:
+                    update_fields = []
+                    params = {"session_id": session_id}
+                    
+                    if ended_at is not None:
+                        update_fields.append("ended_at = %(ended_at)s")
+                        params["ended_at"] = ended_at
+                    
+                    if metadata is not None:
+                        update_fields.append("metadata = %(metadata)s")
+                        params["metadata"] = metadata
+                    
+                    if update_fields:
+                        query = f"""
+                            UPDATE conversation_sessions 
+                            SET {", ".join(update_fields)}
+                            WHERE session_id = %(session_id)s
+                        """
+                        await cur.execute(query, params)
+                        await conn.commit()
+                        print(f"✅ Updated conversation session: {session_id}")
+                        return True
+                    return False
+        except Exception as e:
+            print(f"❌ Error updating conversation session: {e}")
+            return False
+    
+    async def delete_conversation_session(self, session_id: str):
+        """Delete a conversation session and all related data"""
+        try:
+            async with await psycopg.AsyncConnection.connect(self.db_url) as conn:
+                async with conn.cursor() as cur:
+                    # Delete in order due to foreign key constraints
+                    await cur.execute("DELETE FROM conversation_content WHERE turn_id IN (SELECT turn_id FROM conversation_turns WHERE session_id = %s)", (session_id,))
+                    await cur.execute("DELETE FROM conversation_turns WHERE session_id = %s", (session_id,))
+                    await cur.execute("DELETE FROM conversation_sessions WHERE session_id = %s", (session_id,))
+                    
+                    await conn.commit()
+                    print(f"✅ Deleted conversation session: {session_id}")
+                    return True
+        except Exception as e:
+            print(f"❌ Error deleting conversation session: {e}")
+            return False
+    
+    async def get_conversation_analytics(self, user_id: str = None, days: int = 30) -> Dict[str, Any]:
+        """Get analytics about conversations"""
+        try:
+            async with await psycopg.AsyncConnection.connect(self.db_url) as conn:
+                async with conn.cursor() as cur:
+                    analytics = {}
+                    
+                    # Total sessions
+                    if user_id:
+                        await cur.execute("""
+                            SELECT COUNT(*) FROM conversation_sessions 
+                            WHERE user_id = %(user_id)s AND started_at >= NOW() - INTERVAL '%(days)s days'
+                        """, {"user_id": user_id, "days": days})
+                    else:
+                        await cur.execute("""
+                            SELECT COUNT(*) FROM conversation_sessions 
+                            WHERE started_at >= NOW() - INTERVAL '%(days)s days'
+                        """, {"days": days})
+                    
+                    analytics["total_sessions"] = (await cur.fetchone())[0]
+                    
+                    # Total turns
+                    if user_id:
+                        await cur.execute("""
+                            SELECT COUNT(*) FROM conversation_turns ct
+                            JOIN conversation_sessions cs ON ct.session_id = cs.session_id
+                            WHERE cs.user_id = %(user_id)s AND cs.started_at >= NOW() - INTERVAL '%(days)s days'
+                        """, {"user_id": user_id, "days": days})
+                    else:
+                        await cur.execute("""
+                            SELECT COUNT(*) FROM conversation_turns ct
+                            JOIN conversation_sessions cs ON ct.session_id = cs.session_id
+                            WHERE cs.started_at >= NOW() - INTERVAL '%(days)s days'
+                        """, {"days": days})
+                    
+                    analytics["total_turns"] = (await cur.fetchone())[0]
+                    
+                    # Content type distribution
+                    if user_id:
+                        await cur.execute("""
+                            SELECT cc.content_type, COUNT(*) 
+                            FROM conversation_content cc
+                            JOIN conversation_turns ct ON cc.turn_id = ct.turn_id
+                            JOIN conversation_sessions cs ON ct.session_id = cs.session_id
+                            WHERE cs.user_id = %(user_id)s AND cs.started_at >= NOW() - INTERVAL '%(days)s days'
+                            GROUP BY cc.content_type
+                        """, {"user_id": user_id, "days": days})
+                    else:
+                        await cur.execute("""
+                            SELECT cc.content_type, COUNT(*) 
+                            FROM conversation_content cc
+                            JOIN conversation_turns ct ON cc.turn_id = ct.turn_id
+                            JOIN conversation_sessions cs ON ct.session_id = cs.session_id
+                            WHERE cs.started_at >= NOW() - INTERVAL '%(days)s days'
+                            GROUP BY cc.content_type
+                        """, {"days": days})
+                    
+                    analytics["content_by_type"] = dict(await cur.fetchall())
+                    
+                    # MCP tool usage
+                    if user_id:
+                        await cur.execute("""
+                            SELECT cc.mcp_tool_used, COUNT(*) 
+                            FROM conversation_content cc
+                            JOIN conversation_turns ct ON cc.turn_id = ct.turn_id
+                            JOIN conversation_sessions cs ON ct.session_id = cs.session_id
+                            WHERE cs.user_id = %(user_id)s AND cs.started_at >= NOW() - INTERVAL '%(days)s days'
+                            AND cc.mcp_tool_used IS NOT NULL
+                            GROUP BY cc.mcp_tool_used
+                        """, {"user_id": user_id, "days": days})
+                    else:
+                        await cur.execute("""
+                            SELECT cc.mcp_tool_used, COUNT(*) 
+                            FROM conversation_content cc
+                            JOIN conversation_turns ct ON cc.turn_id = ct.turn_id
+                            JOIN conversation_sessions cs ON ct.session_id = cs.session_id
+                            WHERE cs.started_at >= NOW() - INTERVAL '%(days)s days'
+                            AND cc.mcp_tool_used IS NOT NULL
+                            GROUP BY cc.mcp_tool_used
+                        """, {"days": days})
+                    
+                    analytics["mcp_tool_usage"] = dict(await cur.fetchall())
+                    
+                    return analytics
+                    
+        except Exception as e:
+            print(f"❌ Error getting conversation analytics: {e}")
+            return {}

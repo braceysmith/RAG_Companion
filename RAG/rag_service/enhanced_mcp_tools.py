@@ -523,3 +523,4 @@ class EnhancedMCPToolManager(MCPToolManager):
         # Sort by timestamp
         all_history.sort(key=lambda x: x.get("metadata", {}).get("execution_timestamp", 0), reverse=True)
         return all_history
+

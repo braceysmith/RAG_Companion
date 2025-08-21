@@ -4,6 +4,7 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;
+using UnityEngine.UI;
 using UnityEngine.Networking;
 using Unity.WebRTC;
 using TMPro;
@@ -36,11 +37,22 @@ public class MobileRealtimeChat : MonoBehaviour
     [SerializeField] private bool enableReminders = true;
     [SerializeField] private ReminderManager reminderManager;
     
+    [Header("Audio Configuration")]
+    [SerializeField] private AudioSource remoteAudioSource;
+    
+    [Header("BAi Component Integration")]
+    [SerializeField] private BAiComponentManagerV0002 baiComponentManager;
+    
+    [Header("Chat UI Integration")]
+    [SerializeField] private Transform coachChatRoot;        // Chat container
+    [SerializeField] private GameObject chatPostPrefab;      // ChatPostPrefab prefab
+    [SerializeField] private Sprite aiBackgroundSprite;      // AI message background
+    [SerializeField] private ScrollRect chatScrollRect;      // For scrolling
+    
     // WebRTC Components
     private RTCPeerConnection peerConnection;
     private RTCDataChannel dataChannel;
     private AudioStreamTrack localMicTrack;
-    private AudioSource remoteAudioSource;
     
     // Connection state
     private string ephemeralKey;
@@ -74,7 +86,9 @@ public class MobileRealtimeChat : MonoBehaviour
     public event Action<string> OnTranscriptReceived;
     public event Action<string> OnAIResponseReceived;
     public event Action<string> OnError;
-    
+
+    [Header("Animation")]
+    public UI_no_weapon animationController; // Reference to character animation controller
     private void Start()
     {
         // Initialize Unity audio settings for better WebRTC compatibility
@@ -121,7 +135,31 @@ public class MobileRealtimeChat : MonoBehaviour
         // Get component references
         companionUI = GetComponent<MobileCompanionUI>() ?? FindFirstObjectByType<MobileCompanionUI>();
         ragClient = GetComponent<MobileRAGClient>() ?? FindFirstObjectByType<MobileRAGClient>();
-        ragConfig = RAGConfiguration.Instance;
+        
+        // Initialize RAG configuration with validation
+        try
+        {
+            RAGConfiguration.ValidateAndFixConfiguration();
+            ragConfig = RAGConfiguration.Instance;
+            
+            if (ragConfig != null && ragConfig.Settings != null)
+            {
+                LogMessage("✅ RAG Configuration loaded successfully");
+                LogMessage($"Companion Name: {ragConfig.Settings.companionName}");
+                LogMessage($"Model: {ragConfig.Settings.modelName}");
+                LogMessage($"RAG Enabled: {ragConfig.Settings.enableRAG}");
+            }
+            else
+            {
+                LogError("❌ RAG Configuration failed to load properly");
+                ragConfig = null;
+            }
+        }
+        catch (System.Exception ex)
+        {
+            LogError($"❌ Error loading RAG Configuration: {ex.Message}");
+            ragConfig = null;
+        }
         
         // Debug RAG configuration
         LogMessage($"RAG Client initialized: {ragClient != null}");
@@ -166,20 +204,35 @@ public class MobileRealtimeChat : MonoBehaviour
         }
         
         // Setup audio source for remote audio
-        remoteAudioSource = gameObject.GetComponent<AudioSource>();
         if (remoteAudioSource == null)
         {
-            remoteAudioSource = gameObject.AddComponent<AudioSource>();
+            remoteAudioSource = gameObject.GetComponent<AudioSource>();
+            if (remoteAudioSource == null)
+            {
+                remoteAudioSource = gameObject.AddComponent<AudioSource>();
+                LogMessage("✅ Auto-created AudioSource component for remote audio");
+            }
+            else
+            {
+                LogMessage("✅ Found existing AudioSource component on GameObject");
+            }
+        }
+        else
+        {
+            LogMessage("✅ Using AudioSource assigned via Inspector");
         }
         
         // Configure audio source for WebRTC remote audio
         remoteAudioSource.playOnAwake = false;
         remoteAudioSource.loop = false;
         remoteAudioSource.volume = 1.0f;
-        remoteAudioSource.spatialBlend = 0f; // 2D audio
+        //remoteAudioSource.spatialBlend = 0f; // 2D audio
         remoteAudioSource.priority = 128;
         
         LogMessage("Remote audio source configured for WebRTC output");
+        
+        // Log AudioSource configuration for debugging
+        LogAudioSourceConfiguration();
         
         // Subscribe to UI events
         if (companionUI != null)
@@ -446,8 +499,14 @@ public class MobileRealtimeChat : MonoBehaviour
         // Enable microphone for continuous listening
         if (localMicTrack != null && microphoneClip != null)
         {
+            
             LogMessage($"Starting audio streaming to OpenAI");
             isTalking = true;
+
+            //ai is waiting
+            if(animationController!=null)
+                animationController.ListenNeutralOnClick();
+
             currentTranscript.Clear();
             lastMicrophonePosition = Microphone.GetPosition(null);
             
@@ -698,6 +757,7 @@ public class MobileRealtimeChat : MonoBehaviour
                 remoteAudioSource.SetTrack(audioTrack);
                 remoteAudioSource.Play();
                 
+                LogMessage($"🔊 Remote audio playing on: {remoteAudioSource.name} (GameObject: {remoteAudioSource.gameObject.name})");
                 LogMessage("Remote audio track connected and playing");
                 
                 // Update UI to show audio is playing
@@ -744,6 +804,17 @@ public class MobileRealtimeChat : MonoBehaviour
             LogMessage("Data channel opened - WebRTC connection fully established");
             isConnectionActive = true;
             
+            // Activate BAi component when connection opens
+            if (baiComponentManager != null)
+            {
+                LogMessage("🤖 Activating BAi component - connection established");
+                baiComponentManager.ActivateBAi();
+            }
+            else
+            {
+                LogMessage("⚠️ BAi component manager not assigned - BAi will not be activated");
+            }
+            
             // Send session configuration
             SendSessionConfiguration();
             
@@ -769,6 +840,14 @@ public class MobileRealtimeChat : MonoBehaviour
         {
             LogMessage("Data channel closed");
             isConnectionActive = false;
+            
+            // Deactivate BAi component when connection closes
+            if (baiComponentManager != null)
+            {
+                LogMessage("🤖 Deactivating BAi component - connection lost");
+                baiComponentManager.DeactivateBAI();
+            }
+            
             OnConnectionLost?.Invoke();
         };
         
@@ -814,11 +893,22 @@ public class MobileRealtimeChat : MonoBehaviour
             yield return null;
         }
         
-        // Create local audio source
+        // Create local audio source for microphone (separate from remote audio source)
         AudioSource localAudioSource = gameObject.GetComponent<AudioSource>();
         if (localAudioSource == null)
         {
             localAudioSource = gameObject.AddComponent<AudioSource>();
+            LogMessage("✅ Created local AudioSource for microphone input");
+        }
+        else if (localAudioSource == remoteAudioSource)
+        {
+            // If the same AudioSource is used for both local and remote, create a separate one for local
+            localAudioSource = gameObject.AddComponent<AudioSource>();
+            LogMessage("✅ Created separate local AudioSource to avoid conflict with remote audio");
+        }
+        else
+        {
+            LogMessage("✅ Using existing local AudioSource for microphone input");
         }
         
         localAudioSource.clip = microphoneClip;
@@ -1029,20 +1119,30 @@ public class MobileRealtimeChat : MonoBehaviour
             currentTranscript.Append(transcript);
             
             OnTranscriptReceived?.Invoke(transcript);
-            
+
+            //user is speaking
+            if (animationController != null)
+                animationController.ListenFriendlyOnClick();
+
             // Store user input in RAG memory
             StoreUserMessage(transcript);
-            
+
             // Update UI - transcript received, now waiting for AI response
             if (companionUI != null)
             {
                 companionUI.ShowTranscript(transcript);
-                companionUI.AddMessage(transcript, "user");
                 companionUI.ShowProcessingIndicator(false);
-                
+
                 // Show that we're now waiting for AI response
                 companionUI.UpdateStatusText("AI is thinking...");
+
+                //ai is thinking
+                if (animationController != null)
+                    animationController.Idle01OnClick();
             }
+
+            // Create chat post using ChatPostPrefab
+            CreateChatPost(ChatPostPrefab.ChatPostType.text, transcript, true);
         }
     }
     
@@ -1059,6 +1159,11 @@ public class MobileRealtimeChat : MonoBehaviour
     private void HandleResponseStart()
     {
         isAIResponding = true;
+
+        //ai is talking
+        if (animationController != null)
+            animationController.TalkFriendlyOnClick();
+
         LogMessage("AI response started - transitioning to Responding state");
         
         // Update UI to Responding state initially (shows INTERRUPT button)
@@ -1182,7 +1287,6 @@ public class MobileRealtimeChat : MonoBehaviour
             if (companionUI != null)
             {
                 companionUI.ShowProcessingIndicator(false);
-                companionUI.AddMessage(text, "assistant");
                 
                 // If we weren't already responding, start now
                 if (!isAIResponding)
@@ -1191,6 +1295,9 @@ public class MobileRealtimeChat : MonoBehaviour
                     companionUI.ShowAudioPlaybackIndicator(true);
                 }
             }
+            
+            // Create chat post using ChatPostPrefab
+            CreateChatPost(ChatPostPrefab.ChatPostType.text, text, false);
         }
     }
     
@@ -1784,8 +1891,11 @@ public class MobileRealtimeChat : MonoBehaviour
             if (companionUI != null)
             {
                 // Clear any previous text response and show the actual spoken version
-                companionUI.AddMessage(transcript, "assistant");
+                // (UI updates handled by companionUI)
             }
+            
+            // Create chat post using ChatPostPrefab
+            CreateChatPost(ChatPostPrefab.ChatPostType.text, transcript, false);
             
             currentAITranscript?.Clear();
         }
@@ -1971,11 +2081,8 @@ public class MobileRealtimeChat : MonoBehaviour
             {
                 Texture2D texture = ((DownloadHandlerTexture)request.downloadHandler).texture;
                 
-                // Display image in UI
-                if (companionUI != null)
-                {
-                    companionUI.AddImageMessage(texture, prompt, false); // false = AI message
-                }
+                // Display image in UI using ChatPostPrefab
+                CreateChatPost(ChatPostPrefab.ChatPostType.image, prompt, false, texture);
                 
                 LogMessage($"Image displayed in chat: {prompt}");
             }
@@ -2376,6 +2483,11 @@ public class MobileRealtimeChat : MonoBehaviour
         Debug.Log($"[MobileRealtimeChat] {message}");
     }
     
+    private void LogWarning(string message)
+    {
+        Debug.LogWarning($"[MobileRealtimeChat] {message}");
+    }
+    
     private void LogError(string message)
     {
         Debug.LogError($"[MobileRealtimeChat] {message}");
@@ -2610,6 +2722,111 @@ public class MobileRealtimeChat : MonoBehaviour
     public bool IsTalking => isTalking;
     public bool IsAIResponding => isAIResponding;
     public AudioSource RemoteAudioSource => remoteAudioSource;
+    
+    public void SetRemoteAudioSource(AudioSource audioSource)
+    {
+        remoteAudioSource = audioSource;
+        if (audioSource != null)
+        {
+            LogMessage($"✅ Remote AudioSource set to: {audioSource.name}");
+            LogAudioSourceConfiguration();
+        }
+        else
+        {
+            LogMessage("⚠️ Remote AudioSource cleared");
+        }
+    }
+    
+    public void SetBAiComponentManager(BAiComponentManagerV0002 manager)
+    {
+        baiComponentManager = manager;
+        if (manager != null)
+        {
+            LogMessage($"✅ BAi Component Manager set to: {manager.name}");
+        }
+        else
+        {
+            LogMessage("⚠️ BAi Component Manager cleared");
+        }
+    }
+    
+    // Chat Post Creation Methods
+    private void CreateChatPost(ChatPostPrefab.ChatPostType postType, string text, bool isHuman, Texture2D image = null)
+    {
+        if (coachChatRoot == null || chatPostPrefab == null) 
+        {
+            LogWarning("⚠️ Chat UI components not assigned - cannot create chat post");
+            return;
+        }
+        
+        LogMessage($"🔍 Creating chat post: type={postType}, text='{text}', isHuman={isHuman}, image={(image != null ? $"valid ({image.width}x{image.height})" : "null")}");
+        
+        GameObject postObj = Instantiate(chatPostPrefab, coachChatRoot);
+        ChatPostPrefab postComponent = postObj.GetComponent<ChatPostPrefab>();
+        
+        if (postComponent != null)
+        {
+            // Set AI background sprite if available
+            if (aiBackgroundSprite != null && !isHuman)
+            {
+                postComponent.aiBackgroundSprite = aiBackgroundSprite;
+            }
+            
+            // Initialize the post - now much simpler with RawImage support!
+            if (image != null)
+            {
+                LogMessage($"🖼️ Initializing post with Texture2D image");
+                postComponent.InitializeWithTexture(postType, text, isHuman, image);
+            }
+            else
+            {
+                LogMessage($"📝 Initializing text-only post");
+                postComponent.Initialize(postType, text, isHuman);
+            }
+            
+            LogMessage($"✅ Created chat post: {postType} - {(isHuman ? "User" : "AI")}");
+        }
+        else
+        {
+            LogError("❌ Failed to get ChatPostPrefab component from instantiated object");
+        }
+        
+        // Scroll to bottom
+        ScrollToBottom();
+    }
+    
+    private void ScrollToBottom()
+    {
+        if (chatScrollRect != null)
+        {
+            StartCoroutine(ScrollToBottomNextFrame());
+        }
+    }
+    
+    private IEnumerator ScrollToBottomNextFrame()
+    {
+        yield return null;
+        chatScrollRect.normalizedPosition = Vector2.zero;
+    }
+    
+    private void LogAudioSourceConfiguration()
+    {
+        if (remoteAudioSource != null)
+        {
+            LogMessage($"🔊 AudioSource Configuration:");
+            LogMessage($"   - Name: {remoteAudioSource.name}");
+            LogMessage($"   - GameObject: {remoteAudioSource.gameObject.name}");
+            LogMessage($"   - Volume: {remoteAudioSource.volume}");
+            LogMessage($"   - Mute: {remoteAudioSource.mute}");
+            LogMessage($"   - Play On Awake: {remoteAudioSource.playOnAwake}");
+            LogMessage($"   - Loop: {remoteAudioSource.loop}");
+            LogMessage($"   - Spatial Blend: {remoteAudioSource.spatialBlend}");
+        }
+        else
+        {
+            LogMessage("⚠️ No AudioSource configured for remote audio");
+        }
+    }
     
     // Image Analysis Methods
     public void AnalyzeUploadedImage(string base64ImageData)

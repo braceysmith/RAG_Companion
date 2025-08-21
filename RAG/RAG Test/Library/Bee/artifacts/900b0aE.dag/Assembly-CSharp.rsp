@@ -435,6 +435,7 @@
 -analyzer:"/Applications/Unity/Hub/Editor/6000.0.32f1/Unity.app/Contents/Tools/Unity.SourceGenerators/Unity.Properties.SourceGenerator.dll"
 -analyzer:"/Applications/Unity/Hub/Editor/6000.0.32f1/Unity.app/Contents/Tools/Unity.SourceGenerators/Unity.SourceGenerators.dll"
 -analyzer:"/Applications/Unity/Hub/Editor/6000.0.32f1/Unity.app/Contents/Tools/Unity.SourceGenerators/Unity.UIToolkit.SourceGenerator.dll"
+"Assets/rpg animations/scripts/UI_no_weapon.cs"
 "Assets/Scripts/Audio/AvatarSpeechController.cs"
 "Assets/Scripts/CompanionInputHandler.cs"
 "Assets/Scripts/CompanionUI.cs"
@@ -450,6 +451,7 @@
 "Assets/Scripts/Mobile/MobileRAGClient.cs"
 "Assets/Scripts/Mobile/MobileRAGCompanionSystem.cs"
 "Assets/Scripts/Mobile/MobileRealtimeChat.cs"
+"Assets/Scripts/Mobile/PlatformConfig.cs"
 "Assets/Scripts/Mobile/RAGClient.cs"
 "Assets/Scripts/Mobile/RAGConfiguration.cs"
 "Assets/Scripts/Mobile/ReminderManager.cs"
@@ -464,6 +466,16 @@
 "Assets/Scripts/RAGSystemTester.cs"
 "Assets/Scripts/Realtime/RealtimeSessionManager.cs"
 "Assets/TutorialInfo/Scripts/Readme.cs"
+"Assets/_Scripts/AudioScaleEffect.cs"
+"Assets/_Scripts/ChatPostPrefab.cs"
+"Assets/_Scripts/ConfirmationPanel.cs"
+"Assets/_Scripts/CoreV0002/BAiComponentManagerV0002.cs"
+"Assets/_Scripts/CoreV0002/bAiEmotionDisplayManagerV0002.cs"
+"Assets/_Scripts/FollowYAxisRotation.cs"
+"Assets/_Scripts/InputManager.cs"
+"Assets/_Scripts/KeyboardManager.cs"
+"Assets/_Scripts/PersonalityBasedEyeMovement.cs"
+"Assets/_Scripts/RotateTowardsWithDelay.cs"
 -langversion:9.0
 /deterministic
 /optimize+

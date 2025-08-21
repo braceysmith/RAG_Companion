@@ -1,6 +1,7 @@
 import os
 import uuid
 import asyncio
+import time
 from typing import List, Optional, Dict, Any
 from pathlib import Path
 from datetime import datetime
@@ -21,6 +22,7 @@ from audio_handler import audio_handler
 from hybrid_rag_system import get_hybrid_rag, process_voice_query
 from companion_system.needs_framework import needs_framework, memory_enhancer
 from companion_system.needs_database import NeedsDatabase
+from conversation_manager import ConversationManager
 
 # Load environment variables
 load_dotenv()
@@ -150,20 +152,26 @@ class TTSRequest(BaseModel):
 # Global state
 embedding_cache = {}
 user_profiles = {}  # Simple in-memory storage for personal info
-user_conversations = {}  # Store recent conversation history for context
+user_conversations = {}  # Store recent conversation history for context (legacy)
 user_reminders = {}  # Store active reminders {user_id: [reminder_objects]}
+conversation_manager = None  # Will be initialized after database setup
 
 @app.on_event("startup")
 async def startup_event():
     """Initialize database on startup"""
-    global database_available
+    global database_available, conversation_manager
     try:
         await db.initialize()
         database_available = True
+        
+        # Initialize conversation manager
+        conversation_manager = ConversationManager(db)
         print("✅ RAG service started successfully with PostgreSQL + pgvector")
         print(f"📊 Database URL: {database_url[:50]}...")
+        print("✅ Conversation manager initialized with database persistence")
     except Exception as e:
         database_available = False
+        conversation_manager = None
         print(f"❌ Database initialization failed: {e}")
         print(f"🔄 RAG service started with in-memory fallback mode")
         print(f"💡 To enable vector database: Set DATABASE_URL to a PostgreSQL URL with pgvector extension")
@@ -175,7 +183,8 @@ async def health_check():
         "status": "healthy", 
         "service": "RAG Companion Service",
         "database_available": database_available,
-        "vector_search": "enabled" if database_available else "fallback_mode",
+        "vector_search": "postgresql_pgvector" if database_available else "fallback_mode",
+        "conversation_manager": "active" if conversation_manager else "inactive",
         "stored_users": len(user_profiles),
         "active_reminders": sum(len(reminders) for reminders in user_reminders.values())
     }
@@ -872,51 +881,104 @@ def get_pending_reminders(user_id: str) -> list:
     
     return pending_reminders
 
-def store_conversation_turn(user_id: str, user_message: str, ai_response: str):
-    """Store conversation turn for context (memory only)"""
-    import time
-    if user_id not in user_conversations:
-        user_conversations[user_id] = []
+async def store_conversation_turn(user_id: str, user_message: str, ai_response: str, 
+                                retrieved_chunks: List[str] = None, metadata: Dict[str, Any] = None):
+    """Store conversation turn using conversation manager with database persistence"""
+    global conversation_manager
     
-    # Add new turn
-    user_conversations[user_id].append({
-        "user": user_message,
-        "assistant": ai_response,
-        "timestamp": time.time()
-    })
-    
-    # Keep only last 5 conversation turns
-    if len(user_conversations[user_id]) > 5:
-        user_conversations[user_id] = user_conversations[user_id][-5:]
+    try:
+        if not conversation_manager:
+            # Fallback to legacy in-memory storage
+            if user_id not in user_conversations:
+                user_conversations[user_id] = []
+            
+            user_conversations[user_id].append({
+                "user": user_message,
+                "assistant": ai_response,
+                "timestamp": time.time()
+            })
+            
+            if len(user_conversations[user_id]) > 5:
+                user_conversations[user_id] = user_conversations[user_id][-5:]
+            return
+        
+        # Get or create active session for user
+        session_id = await conversation_manager.get_active_session(user_id)
+        if not session_id:
+            # Start new session
+            session_metadata = {
+                "source": "rag_api",
+                "initial_message": user_message[:100]  # First 100 chars
+            }
+            session_id = await conversation_manager.start_conversation_session(user_id, session_metadata)
+        
+        # Add conversation turn
+        turn_id = await conversation_manager.add_conversation_turn(
+            session_id=session_id,
+            user_id=user_id,
+            user_message=user_message,
+            assistant_response=ai_response,
+            retrieved_chunks=retrieved_chunks,
+            metadata=metadata
+        )
+        
+        # Add text content for user message
+        await conversation_manager.add_conversation_content(
+            turn_id=turn_id,
+            user_id=user_id,
+            content_type="text",
+            content_data=user_message,
+            content_order=0,
+            is_user_content=True
+        )
+        
+        # Add text content for assistant response
+        await conversation_manager.add_conversation_content(
+            turn_id=turn_id,
+            user_id=user_id,
+            content_type="text",
+            content_data=ai_response,
+            content_order=1,
+            is_user_content=False
+        )
+        
+        print(f"✅ Stored conversation turn in database for user {user_id}, session {session_id}")
+        
+    except Exception as e:
+        print(f"❌ Failed to store conversation turn: {e}")
+        # Fallback to legacy storage
+        if user_id not in user_conversations:
+            user_conversations[user_id] = []
+        
+        user_conversations[user_id].append({
+            "user": user_message,
+            "assistant": ai_response,
+            "timestamp": time.time()
+        })
+        
+        if len(user_conversations[user_id]) > 5:
+            user_conversations[user_id] = user_conversations[user_id][-5:]
 
 async def store_conversation_turn_db(user_id: str, user_message: str, ai_response: str):
-    """Store conversation turn in database for admin tracking"""
-    try:
-        if not database_available:
-            return
-            
-        async with await psycopg.AsyncConnection.connect(database_url) as conn:
-            async with conn.cursor() as cur:
-                # Insert conversation turn
-                await cur.execute("""
-                    INSERT INTO conversation_turns (user_id, user_message, assistant_response, created_at)
-                    VALUES (%s, %s, %s, NOW())
-                """, (user_id, user_message, ai_response))
-                
-                await conn.commit()
-                print(f"✅ Stored conversation turn in database for user {user_id}")
-                
-    except Exception as e:
-        print(f"❌ Failed to store conversation turn in database: {e}")
-        # Don't fail the main flow if database storage fails
+    """Legacy function - now handled by store_conversation_turn"""
+    await store_conversation_turn(user_id, user_message, ai_response)
 
-def get_conversation_context(user_id: str) -> str:
-    """Get recent conversation context"""
+async def get_conversation_context(user_id: str, context_length: int = 5) -> str:
+    """Get recent conversation context using conversation manager"""
+    global conversation_manager
+    
+    try:
+        if conversation_manager:
+            return await conversation_manager.get_conversation_context(user_id, context_length=context_length)
+    except Exception as e:
+        print(f"Error getting conversation context from manager: {e}")
+    
+    # Fallback to legacy in-memory storage
     if user_id not in user_conversations:
         return ""
     
     context_parts = []
-    for turn in user_conversations[user_id][-3:]:  # Last 3 turns
+    for turn in user_conversations[user_id][-context_length:]:
         context_parts.append(f"User: {turn['user']}")
         context_parts.append(f"Assistant: {turn['assistant']}")
     
@@ -1350,21 +1412,29 @@ async def rag_query_sync(request: dict):
             # Generate conversational response (RAG or personal AI response)
             print(f"🔍 /query endpoint: results={len(results)}, not results={not results}")
             
-            # Store the conversation turn for tracking (only for accounts that support it)
+            # Store the conversation turn for tracking
             try:
                 if results:
                     # Store the AI response as well
                     ai_response = results[0].get("text", "No response generated")
-                    # Store in memory for context (always)
-                    store_conversation_turn(user_id, query_text, ai_response)
                     
-                    # Store in database for admin tracking (only for accounts that support it)
-                    async with await psycopg.AsyncConnection.connect(database_url) as conn:
-                        async with conn.cursor() as cur:
-                            await cur.execute("SELECT account_type FROM user_accounts WHERE user_id = %s", (user_id,))
-                            row = await cur.fetchone()
-                            if row and row[0] in ["admin", "user"]:
-                                await store_conversation_turn_db(user_id, query_text, ai_response)
+                    # Get retrieved chunks for context
+                    retrieved_chunks = [result.get("chunk_id", "") for result in results if result.get("chunk_id")]
+                    
+                    # Store conversation turn with enhanced metadata
+                    metadata = {
+                        "source": "rag_query",
+                        "top_k": len(results),
+                        "has_retrieved_chunks": bool(retrieved_chunks)
+                    }
+                    
+                    await store_conversation_turn(
+                        user_id, 
+                        query_text, 
+                        ai_response,
+                        retrieved_chunks=retrieved_chunks,
+                        metadata=metadata
+                    )
             except Exception as conv_error:
                 print(f"Warning: Could not store conversation turn: {conv_error}")
             if not results:
@@ -3028,6 +3098,147 @@ async def get_audio_streaming_status():
             "error": str(e),
             "audio_streaming": None
         }
+
+@app.get("/conversations/{user_id}")
+async def get_user_conversations(user_id: str, limit: int = 10):
+    """Get conversation history for a user"""
+    try:
+        if not conversation_manager:
+            raise HTTPException(status_code=503, detail="Conversation manager not available")
+        
+        history = await conversation_manager.get_conversation_history(user_id, limit)
+        return {
+            "user_id": user_id,
+            "conversations": history,
+            "total_conversations": len(history)
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get conversation history: {str(e)}")
+
+@app.get("/conversations/{user_id}/sessions")
+async def get_user_sessions(user_id: str, limit: int = 10):
+    """Get conversation sessions for a user"""
+    try:
+        if not conversation_manager:
+            raise HTTPException(status_code=503, detail="Conversation manager not available")
+        
+        sessions = await conversation_manager.database.get_user_conversation_sessions(user_id, limit)
+        return {
+            "user_id": user_id,
+            "sessions": sessions,
+            "total_sessions": len(sessions)
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get user sessions: {str(e)}")
+
+@app.get("/conversations/session/{session_id}")
+async def get_session_details(session_id: str):
+    """Get detailed information about a conversation session"""
+    try:
+        if not conversation_manager:
+            raise HTTPException(status_code=503, detail="Conversation manager not available")
+        
+        summary = await conversation_manager.get_session_summary(session_id)
+        if not summary:
+            raise HTTPException(status_code=404, detail="Session not found")
+        
+        return summary
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get session details: {str(e)}")
+
+@app.get("/conversations/session/{session_id}/turns")
+async def get_session_turns(session_id: str):
+    """Get all turns for a conversation session"""
+    try:
+        if not conversation_manager:
+            raise HTTPException(status_code=503, detail="Conversation manager not available")
+        
+        turns = await conversation_manager.database.get_conversation_turns(session_id)
+        return {
+            "session_id": session_id,
+            "turns": turns,
+            "total_turns": len(turns)
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get session turns: {str(e)}")
+
+@app.get("/conversations/analytics/{user_id}")
+async def get_user_conversation_analytics(user_id: str, days: int = 30):
+    """Get conversation analytics for a user"""
+    try:
+        if not conversation_manager:
+            raise HTTPException(status_code=503, detail="Conversation manager not available")
+        
+        analytics = await conversation_manager.database.get_conversation_analytics(user_id, days)
+        return {
+            "user_id": user_id,
+            "period_days": days,
+            "analytics": analytics
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get conversation analytics: {str(e)}")
+
+@app.get("/conversations/analytics")
+async def get_global_conversation_analytics(days: int = 30):
+    """Get global conversation analytics"""
+    try:
+        if not conversation_manager:
+            raise HTTPException(status_code=503, detail="Conversation manager not available")
+        
+        analytics = await conversation_manager.database.get_conversation_analytics(days=days)
+        return {
+            "period_days": days,
+            "analytics": analytics
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get global analytics: {str(e)}")
+
+@app.post("/conversations/session/{session_id}/end")
+async def end_conversation_session(session_id: str):
+    """End a conversation session"""
+    try:
+        if not conversation_manager:
+            raise HTTPException(status_code=503, detail="Conversation manager not available")
+        
+        success = await conversation_manager.end_conversation_session(session_id)
+        if not success:
+            raise HTTPException(status_code=404, detail="Session not found or already ended")
+        
+        return {"message": "Session ended successfully", "session_id": session_id}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to end session: {str(e)}")
+
+@app.delete("/conversations/session/{session_id}")
+async def delete_conversation_session(session_id: str):
+    """Delete a conversation session and all related data"""
+    try:
+        if not conversation_manager:
+            raise HTTPException(status_code=503, detail="Conversation manager not available")
+        
+        success = await conversation_manager.database.delete_conversation_session(session_id)
+        if not success:
+            raise HTTPException(status_code=404, detail="Session not found")
+        
+        return {"message": "Session deleted successfully", "session_id": session_id}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to delete session: {str(e)}")
+
+@app.get("/conversations/search/{user_id}")
+async def search_conversation_history(user_id: str, query: str, limit: int = 5):
+    """Search conversation history for a user"""
+    try:
+        if not conversation_manager:
+            raise HTTPException(status_code=503, detail="Conversation manager not available")
+        
+        results = await conversation_manager.search_conversation_history(user_id, query, limit)
+        return {
+            "user_id": user_id,
+            "query": query,
+            "results": results,
+            "total_results": len(results)
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to search conversation history: {str(e)}")
 
 if __name__ == "__main__":
     import uvicorn

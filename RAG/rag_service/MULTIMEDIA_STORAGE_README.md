@@ -395,3 +395,4 @@ This multimedia storage system is part of the RAG Companion System and follows t
 3. Run the example script to test the system
 4. Integrate with your existing RAG system
 5. Customize MCP tools for your specific needs
+

@@ -50,11 +50,39 @@ public class RAGConfiguration : ScriptableObject
         {
             if (instance == null)
             {
+                // Try to load from Resources
                 instance = Resources.Load<RAGConfiguration>("RAGConfiguration");
+                
                 if (instance == null)
                 {
-                    instance = CreateInstance<RAGConfiguration>();
                     Debug.LogWarning("RAGConfiguration not found in Resources. Using default settings.");
+                    
+                    // Create a new instance with default settings
+                    instance = CreateInstance<RAGConfiguration>();
+                    
+                    // Try to save it to Resources folder
+                    try
+                    {
+                        #if UNITY_EDITOR
+                        if (!System.IO.Directory.Exists("Assets/Resources"))
+                        {
+                            System.IO.Directory.CreateDirectory("Assets/Resources");
+                        }
+                        
+                        UnityEditor.AssetDatabase.CreateAsset(instance, "Assets/Resources/RAGConfiguration.asset");
+                        UnityEditor.AssetDatabase.SaveAssets();
+                        UnityEditor.AssetDatabase.Refresh();
+                        Debug.Log("Created new RAGConfiguration asset in Resources folder");
+                        #endif
+                    }
+                    catch (System.Exception ex)
+                    {
+                        Debug.LogWarning($"Could not create asset file: {ex.Message}");
+                    }
+                }
+                else
+                {
+                    Debug.Log("RAGConfiguration loaded successfully from Resources");
                 }
             }
             return instance;
@@ -98,6 +126,38 @@ public class RAGConfiguration : ScriptableObject
     {
         settings = new RAGSettings();
         Debug.Log("RAG settings reset to defaults");
+    }
+    
+    public static void RefreshConfiguration()
+    {
+        instance = null;
+        Debug.Log("RAGConfiguration refreshed - will reload on next access");
+    }
+    
+    public static bool IsConfigurationValid()
+    {
+        if (Instance == null)
+            return false;
+            
+        if (Instance.settings == null)
+            return false;
+            
+        return true;
+    }
+    
+    public static void ValidateAndFixConfiguration()
+    {
+        if (!IsConfigurationValid())
+        {
+            Debug.LogError("RAGConfiguration is invalid - attempting to fix...");
+            RefreshConfiguration();
+            
+            if (!IsConfigurationValid())
+            {
+                Debug.LogError("Failed to fix RAGConfiguration - creating new instance");
+                instance = CreateInstance<RAGConfiguration>();
+            }
+        }
     }
     
     public void ValidateSettings()
