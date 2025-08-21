@@ -392,6 +392,7 @@
 
         <div class="nav-tabs">
             <button class="nav-tab active" onclick="showTab('overview')">📊 Overview</button>
+            <button class="nav-tab" onclick="showTab('conversations')">💬 Conversations</button>
             <button class="nav-tab" onclick="showTab('users')">👥 Users</button>
             <button class="nav-tab" onclick="showTab('data')">🗄️ Data Management</button>
             <button class="nav-tab" onclick="showTab('testing')">🧪 Testing</button>
@@ -427,6 +428,78 @@
                 <h3>System Health</h3>
                 <div id="healthStatus">Loading...</div>
                 <button class="btn btn-primary" onclick="checkHealth()">🏥 Check Health</button>
+            </div>
+
+            <div class="card">
+                <h3>Conversation Manager Status</h3>
+                <div id="conversationManagerStatus">Loading...</div>
+                <button class="btn btn-primary" onclick="checkConversationManager()">💬 Check Status</button>
+                <button class="btn btn-success" onclick="forceInitConversations()">🚀 Force Initialize</button>
+            </div>
+        </div>
+
+        <!-- Conversations Tab -->
+        <div id="conversations" class="tab-content">
+            <div class="card">
+                <h3>💬 Conversation Management</h3>
+                <div class="alert alert-success" id="conversationAlert"></div>
+                <div class="loading" id="conversationLoading">
+                    <div class="spinner"></div>
+                    <p>Loading conversations...</p>
+                </div>
+                
+                <div class="form-group">
+                    <label for="conversationUserId">User ID</label>
+                    <input type="text" id="conversationUserId" class="form-control" placeholder="e.g., user123">
+                </div>
+                
+                <div class="form-group">
+                    <label for="conversationLimit">Limit</label>
+                    <input type="number" id="conversationLimit" class="form-control" value="10" min="1" max="100">
+                </div>
+                
+                <div class="form-group">
+                    <label for="conversationSearchTerm">Search Term (for search function)</label>
+                    <input type="text" id="conversationSearchTerm" class="form-control" placeholder="e.g., machine learning">
+                </div>
+                
+                <button class="btn btn-primary" onclick="loadUserConversations()">📋 Load Conversations</button>
+                <button class="btn btn-info" onclick="loadUserSessions()">📅 Load Sessions</button>
+                <button class="btn btn-warning" onclick="searchConversations()">🔍 Search History</button>
+                
+                <div id="conversationsList" style="margin-top: 20px;"></div>
+            </div>
+
+            <div class="card">
+                <h3>📊 Conversation Analytics</h3>
+                <div class="form-group">
+                    <label for="analyticsUserId">User ID (leave empty for global)</label>
+                    <input type="text" id="analyticsUserId" class="form-control" placeholder="e.g., user123 or leave empty">
+                </div>
+                
+                <div class="form-group">
+                    <label for="analyticsDays">Days</label>
+                    <input type="number" id="analyticsDays" class="form-control" value="30" min="1" max="365">
+                </div>
+                
+                <button class="btn btn-primary" onclick="loadConversationAnalytics()">📈 Load Analytics</button>
+                <div id="analyticsDisplay" style="margin-top: 15px;"></div>
+            </div>
+
+            <div class="card">
+                <h3>🗑️ Conversation Cleanup</h3>
+                <div class="form-group">
+                    <label for="cleanupUserId">User ID (leave empty for all users)</label>
+                    <input type="text" id="cleanupUserId" class="form-control" placeholder="e.g., user123 or leave empty">
+                </div>
+                
+                <div class="form-group">
+                    <label for="cleanupDays">Delete conversations older than (days)</label>
+                    <input type="number" id="cleanupDays" class="form-control" value="30" min="1" max="365">
+                </div>
+                
+                <button class="btn btn-danger" onclick="cleanupOldConversations()">🧹 Cleanup Old Conversations</button>
+                <div id="cleanupStatus" style="margin-top: 15px;"></div>
             </div>
         </div>
 
@@ -568,6 +641,12 @@
                 <div id="databaseStatus">Loading...</div>
                 <button class="btn btn-primary" onclick="checkDatabase()">🗄️ Check DB</button>
             </div>
+
+            <div class="card">
+                <h3>🧪 Component Debug</h3>
+                <div id="componentDebug">Loading...</div>
+                <button class="btn btn-primary" onclick="debugComponents()">🔍 Debug Components</button>
+            </div>
         </div>
     </div>
 
@@ -593,6 +672,10 @@
             if (tabName === 'overview') {
                 refreshStats();
                 checkHealth();
+                checkConversationManager(); // Added for conversation manager status
+            } else if (tabName === 'conversations') {
+                loadUserConversations(); // Added for conversation management
+                loadUserSessions(); // Added for conversation management
             } else if (tabName === 'users') {
                 loadUsers();
             } else if (tabName === 'system') {
@@ -895,10 +978,396 @@
             }
         }
 
+        async function debugComponents() {
+            try {
+                const debug = await apiCall('/debug-components');
+                
+                const debugHtml = `
+                    <h4>Component Status</h4>
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px;">
+                        ${Object.entries(debug.components).map(([component, status]) => `
+                            <div style="background: ${status.includes('✅') ? '#d4edda' : '#f8d7da'}; padding: 10px; border-radius: 5px;">
+                                <strong>${component}:</strong> ${status}
+                            </div>
+                        `).join('')}
+                    </div>
+                    <p><small>Last checked: ${new Date(debug.timestamp).toLocaleString()}</small></p>
+                `;
+                
+                document.getElementById('componentDebug').innerHTML = debugHtml;
+            } catch (error) {
+                document.getElementById('componentDebug').innerHTML = '<span style="color: red;">Failed to debug components: ' + error.message + '</span>';
+            }
+        }
+
+        // Conversation Management Functions
+        async function checkConversationManager() {
+            try {
+                const health = await apiCall('/health');
+                const isActive = health.conversation_manager === 'active';
+                
+                document.getElementById('conversationManagerStatus').innerHTML = `
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px;">
+                        <div><strong>Status:</strong> <span style="color: ${isActive ? 'green' : 'red'}">${isActive ? 'Active' : 'Inactive'}</span></div>
+                        <div><strong>Database:</strong> <span style="color: ${health.database_available ? 'green' : 'red'}">${health.database_available ? 'Connected' : 'Disconnected'}</span></div>
+                        <div><strong>Vector Search:</strong> ${health.vector_search}</div>
+                        <div><strong>Last Check:</strong> ${new Date().toLocaleString()}</div>
+                    </div>
+                `;
+                showAlert(`Conversation Manager Status: ${isActive ? 'Active' : 'Inactive'}`, isActive ? 'success' : 'warning');
+            } catch (error) {
+                document.getElementById('conversationManagerStatus').innerHTML = '<span style="color: red;">Failed to check conversation manager status</span>';
+                showAlert(`Failed to check conversation manager status: ${error.message}`, 'danger');
+            }
+        }
+
+        async function forceInitConversations() {
+            if (!confirm('Are you sure you want to force initialize the conversation manager? This will re-initialize all conversation data.')) {
+                return;
+            }
+            try {
+                const result = await apiCall('/force-init-conversations');
+                showAlert(result.message, 'success');
+                checkConversationManager(); // Refresh status after force init
+            } catch (error) {
+                showAlert(`Failed to force initialize conversation manager: ${error.message}`, 'danger');
+            }
+        }
+
+        async function loadUserConversations() {
+            const userId = document.getElementById('conversationUserId').value.trim();
+            const limit = document.getElementById('conversationLimit').value;
+
+            if (!userId) {
+                showAlert('Please enter a User ID to load conversations.', 'warning');
+                return;
+            }
+
+            try {
+                showLoading('conversationLoading', true);
+                const conversations = await apiCall(`/conversations/${userId}?limit=${limit}`);
+                
+                if (conversations.conversations && conversations.conversations.length > 0) {
+                    const conversationsHtml = `
+                        <h4>Conversations for User: ${userId}</h4>
+                        <table class="table">
+                            <thead>
+                                <tr>
+                                    <th>Session ID</th>
+                                    <th>Started At</th>
+                                    <th>Total Turns</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${conversations.conversations.map(session => `
+                                    <tr>
+                                        <td>${session.session.session_id}</td>
+                                        <td>${new Date(session.session.started_at).toLocaleString()}</td>
+                                        <td>${session.turns.length}</td>
+                                        <td>
+                                            <button class="btn btn-info btn-sm" onclick="viewSession('${session.session.session_id}')">👁️ View</button>
+                                            <button class="btn btn-danger btn-sm" onclick="deleteSession('${session.session.session_id}')">🗑️ Delete</button>
+                                        </td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                    `;
+                    
+                    document.getElementById('conversationsList').innerHTML = conversationsHtml;
+                    showAlert(`Loaded ${conversations.conversations.length} conversation sessions for user ${userId}.`, 'success');
+                } else {
+                    document.getElementById('conversationsList').innerHTML = '<p>No conversations found for this user.</p>';
+                    showAlert(`No conversations found for user ${userId}.`, 'info');
+                }
+            } catch (error) {
+                document.getElementById('conversationsList').innerHTML = '<span style="color: red;">Failed to load conversations</span>';
+                showAlert(`Failed to load conversations for user ${userId}: ${error.message}`, 'danger');
+            } finally {
+                showLoading('conversationLoading', false);
+            }
+        }
+
+        async function loadUserSessions() {
+            const userId = document.getElementById('conversationUserId').value.trim();
+            const limit = document.getElementById('conversationLimit').value;
+
+            if (!userId) {
+                showAlert('Please enter a User ID to load sessions.', 'warning');
+                return;
+            }
+
+            try {
+                showLoading('conversationLoading', true);
+                const sessions = await apiCall(`/conversations/${userId}/sessions?limit=${limit}`);
+                
+                if (sessions.sessions && sessions.sessions.length > 0) {
+                    const sessionsHtml = `
+                        <h4>Sessions for User: ${userId}</h4>
+                        <table class="table">
+                            <thead>
+                                <tr>
+                                    <th>Session ID</th>
+                                    <th>Started At</th>
+                                    <th>Ended At</th>
+                                    <th>Status</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${sessions.sessions.map(session => `
+                                    <tr>
+                                        <td>${session.session_id}</td>
+                                        <td>${new Date(session.started_at).toLocaleString()}</td>
+                                        <td>${session.ended_at ? new Date(session.ended_at).toLocaleString() : 'Active'}</td>
+                                        <td><span style="color: ${session.ended_at ? 'orange' : 'green'}">${session.ended_at ? 'Ended' : 'Active'}</span></td>
+                                        <td>
+                                            <button class="btn btn-info btn-sm" onclick="viewSession('${session.session_id}')">👁️ View</button>
+                                            <button class="btn btn-danger btn-sm" onclick="deleteSession('${session.session_id}')">🗑️ Delete</button>
+                                        </td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                    `;
+                    
+                    document.getElementById('conversationsList').innerHTML = sessionsHtml;
+                    showAlert(`Loaded ${sessions.sessions.length} sessions for user ${userId}.`, 'success');
+                } else {
+                    document.getElementById('conversationsList').innerHTML = '<p>No sessions found for this user.</p>';
+                    showAlert(`No sessions found for user ${userId}.`, 'info');
+                }
+            } catch (error) {
+                document.getElementById('conversationsList').innerHTML = '<span style="color: red;">Failed to load sessions</span>';
+                showAlert(`Failed to load sessions for user ${userId}: ${error.message}`, 'danger');
+            } finally {
+                showLoading('conversationLoading', false);
+            }
+        }
+
+        async function searchConversations() {
+            const searchTerm = document.getElementById('conversationSearchTerm').value.trim();
+            const userId = document.getElementById('conversationUserId').value.trim();
+            const limit = document.getElementById('conversationLimit').value;
+
+            if (!searchTerm) {
+                showAlert('Please enter a search term.', 'warning');
+                return;
+            }
+
+            if (!userId) {
+                showAlert('Please enter a User ID to search.', 'warning');
+                return;
+            }
+
+            try {
+                showLoading('conversationLoading', true);
+                const results = await apiCall(`/conversations/search/${userId}?query=${encodeURIComponent(searchTerm)}&limit=${limit}`);
+                
+                if (results.results && results.results.length > 0) {
+                    const searchResultsHtml = `
+                        <h4>Search Results for "${searchTerm}" in User ${userId}</h4>
+                        <table class="table">
+                            <thead>
+                                <tr>
+                                    <th>Session ID</th>
+                                    <th>User Message</th>
+                                    <th>Assistant Response</th>
+                                    <th>Relevance Score</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${results.results.map(result => `
+                                    <tr>
+                                        <td>${result.session_id}</td>
+                                        <td>${result.turn.user_message}</td>
+                                        <td>${result.turn.assistant_response}</td>
+                                        <td>${result.relevance_score ? result.relevance_score.toFixed(3) : 'N/A'}</td>
+                                        <td>
+                                            <button class="btn btn-info btn-sm" onclick="viewSession('${result.session_id}')">👁️ View</button>
+                                        </td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                    `;
+                    
+                    document.getElementById('conversationsList').innerHTML = searchResultsHtml;
+                    showAlert(`Found ${results.results.length} results for "${searchTerm}" in user ${userId}.`, 'success');
+                } else {
+                    document.getElementById('conversationsList').innerHTML = '<p>No search results found.</p>';
+                    showAlert(`No results found for "${searchTerm}" in user ${userId}.`, 'info');
+                }
+            } catch (error) {
+                document.getElementById('conversationsList').innerHTML = '<span style="color: red;">Failed to search conversations</span>';
+                showAlert(`Failed to search conversations for "${searchTerm}" in user ${userId}: ${error.message}`, 'danger');
+            } finally {
+                showLoading('conversationLoading', false);
+            }
+        }
+
+        // These functions are no longer needed as we're using session-based conversation management
+        /*
+        async function viewConversation(convId) {
+            // Function removed - use viewSession instead
+        }
+
+        async function deleteConversation(convId) {
+            // Function removed - use deleteSession instead
+        }
+        */
+
+        async function viewSession(sessionId) {
+            try {
+                const session = await apiCall(`/conversations/session/${sessionId}`);
+                
+                const modal = document.createElement('div');
+                modal.style.cssText = `
+                    position: fixed;
+                    top: 0;
+                    left: 0;
+                    width: 100%;
+                    height: 100%;
+                    background: rgba(0,0,0,0.8);
+                    z-index: 1000;
+                    display: flex;
+                    justify-content: center;
+                    align-items: center;
+                `;
+                
+                modal.innerHTML = `
+                    <div style="background: white; padding: 30px; border-radius: 15px; max-width: 800px; max-height: 80vh; overflow-y: auto;">
+                        <h2>Session Details: ${session.session_id}</h2>
+                        <div style="margin: 20px 0;">
+                            <h3>📊 Session Info</h3>
+                            <p><strong>User ID:</strong> ${session.user_id}</p>
+                            <p><strong>Started:</strong> ${new Date(session.started_at).toLocaleString()}</p>
+                            <p><strong>Ended:</strong> ${session.ended_at ? new Date(session.ended_at).toLocaleString() : 'Active'}</p>
+                            <p><strong>Total Turns:</strong> ${session.total_turns}</p>
+                        </div>
+                        
+                        <div style="margin: 20px 0;">
+                            <h3>💬 Conversation Turns</h3>
+                            ${session.turns && session.turns.length > 0 ? session.turns.map((turn, index) => `
+                                <div style="border: 1px solid #ddd; padding: 15px; margin: 10px 0; border-radius: 8px;">
+                                    <h4>Turn ${index + 1}</h4>
+                                    <p><strong>User:</strong> ${turn.user_message}</p>
+                                    <p><strong>Assistant:</strong> ${turn.assistant_response}</p>
+                                    <p><strong>Created:</strong> ${new Date(turn.created_at).toLocaleString()}</p>
+                                    ${turn.retrieved_chunks && turn.retrieved_chunks.length > 0 ? 
+                                        `<p><strong>Retrieved Chunks:</strong> ${turn.retrieved_chunks.join(', ')}</p>` : ''}
+                                </div>
+                            `).join('') : '<p>No turns found for this session.</p>'}
+                        </div>
+                        
+                        <button class="btn btn-primary" onclick="this.parentElement.parentElement.remove()">Close</button>
+                    </div>
+                `;
+                
+                document.body.appendChild(modal);
+                
+            } catch (error) {
+                alert(`Failed to load session details: ${error.message}`);
+            }
+        }
+
+        async function deleteSession(sessionId) {
+            if (!confirm(`Are you sure you want to delete session ${sessionId}? This will permanently delete the session and all associated data!`)) {
+                return;
+            }
+            
+            try {
+                const result = await apiCall(`/conversations/session/${sessionId}`, {
+                    method: 'DELETE'
+                });
+                
+                showAlert(result.message, 'success');
+                // Refresh the current view
+                const activeTab = document.querySelector('.tab-content.active').id;
+                if (activeTab === 'conversations') {
+                    loadUserConversations();
+                    loadUserSessions();
+                }
+            } catch (error) {
+                showAlert(`Failed to delete session ${sessionId}: ${error.message}`, 'danger');
+            }
+        }
+
+        async function loadConversationAnalytics() {
+            const userId = document.getElementById('analyticsUserId').value.trim();
+            const days = document.getElementById('analyticsDays').value;
+
+            if (!days) {
+                showAlert('Please select a number of days for analytics.', 'warning');
+                return;
+            }
+
+            try {
+                showLoading('conversationLoading', true);
+                const endpoint = userId ? `/conversations/analytics/${userId}?days=${days}` : `/conversations/analytics?days=${days}`;
+                const analytics = await apiCall(endpoint);
+                
+                if (analytics.analytics) {
+                    const analyticsHtml = `
+                        <h4>Conversation Analytics for ${userId || 'All Users'} in the last ${days} days</h4>
+                        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px;">
+                            <div><strong>Total Sessions:</strong> ${analytics.analytics.total_sessions || 0}</div>
+                            <div><strong>Total Turns:</strong> ${analytics.analytics.total_turns || 0}</div>
+                            <div><strong>Content by Type:</strong> ${JSON.stringify(analytics.analytics.content_by_type || {})}</div>
+                            <div><strong>MCP Tool Usage:</strong> ${JSON.stringify(analytics.analytics.mcp_tool_usage || {})}</div>
+                        </div>
+                    `;
+                    
+                    document.getElementById('analyticsDisplay').innerHTML = analyticsHtml;
+                    showAlert(`Loaded analytics for ${userId || 'all users'} in the last ${days} days.`, 'success');
+                } else {
+                    document.getElementById('analyticsDisplay').innerHTML = '<p>No analytics data available.</p>';
+                    showAlert('No analytics data available.', 'info');
+                }
+            } catch (error) {
+                document.getElementById('analyticsDisplay').innerHTML = '<span style="color: red;">Failed to load analytics</span>';
+                showAlert(`Failed to load analytics for ${userId || 'all users'} in the last ${days} days: ${error.message}`, 'danger');
+            } finally {
+                showLoading('conversationLoading', false);
+            }
+        }
+
+        async function cleanupOldConversations() {
+            const userId = document.getElementById('cleanupUserId').value.trim();
+            const days = document.getElementById('cleanupDays').value;
+
+            if (!days) {
+                showAlert('Please select a number of days for cleanup.', 'warning');
+                return;
+            }
+
+            if (!confirm(`Are you sure you want to delete conversations older than ${days} days for ${userId ? `user ${userId}` : 'all users'}? This action cannot be undone.`)) {
+                return;
+            }
+
+            try {
+                showLoading('conversationLoading', true);
+                const result = await apiCall(`/conversation/cleanup?user_id=${userId}&days=${days}`, {
+                    method: 'POST'
+                });
+                showAlert(result.message, 'success');
+                loadUserConversations(); // Refresh list after cleanup
+                loadUserSessions(); // Refresh list after cleanup
+                loadConversationAnalytics(); // Refresh analytics after cleanup
+            } catch (error) {
+                showAlert(`Failed to cleanup old conversations: ${error.message}`, 'danger');
+            } finally {
+                showLoading('conversationLoading', false);
+            }
+        }
+
         // Initialize dashboard
         document.addEventListener('DOMContentLoaded', function() {
             refreshStats();
             checkHealth();
+            checkConversationManager(); // Added for conversation manager status
             setupTestingInterface();
         });
 

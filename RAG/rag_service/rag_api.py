@@ -3279,6 +3279,64 @@ async def force_init_conversations():
     except Exception as e:
         return {"error": f"Initialization failed: {str(e)}"}
 
+@app.get("/debug-components")
+async def debug_components():
+    """Debug endpoint to test individual components"""
+    debug_info = {
+        "status": "debug",
+        "timestamp": datetime.now().isoformat(),
+        "components": {}
+    }
+    
+    # Test 1: Database connection
+    try:
+        await db.initialize()
+        debug_info["components"]["database"] = "✅ Connected"
+    except Exception as e:
+        debug_info["components"]["database"] = f"❌ Failed: {str(e)}"
+    
+    # Test 2: Conversation manager
+    try:
+        if conversation_manager:
+            debug_info["components"]["conversation_manager"] = "✅ Active"
+        else:
+            debug_info["components"]["conversation_manager"] = "❌ Not initialized"
+    except Exception as e:
+        debug_info["components"]["conversation_manager"] = f"❌ Error: {str(e)}"
+    
+    # Test 3: Embedding function
+    try:
+        test_embedding = get_embedding("test")
+        debug_info["components"]["embeddings"] = f"✅ Working (vector size: {len(test_embedding)})"
+    except Exception as e:
+        debug_info["components"]["embeddings"] = f"❌ Failed: {str(e)}"
+    
+    # Test 4: Basic database search
+    try:
+        if database_available:
+            test_results = await db.search_chunks([0.1] * 1536, top_k=1)
+            debug_info["components"]["database_search"] = f"✅ Working (found {len(test_results)} results)"
+        else:
+            debug_info["components"]["database_search"] = "❌ Database not available"
+    except Exception as e:
+        debug_info["components"]["database_search"] = f"❌ Failed: {str(e)}"
+    
+    # Test 5: Conversation storage
+    try:
+        if conversation_manager:
+            # Try to start a test session
+            test_session = await conversation_manager.start_conversation_session("debug_user", {"test": True})
+            debug_info["components"]["conversation_storage"] = f"✅ Working (session: {test_session})"
+            
+            # Clean up test session
+            await conversation_manager.end_conversation_session(test_session)
+        else:
+            debug_info["components"]["conversation_storage"] = "❌ Conversation manager not available"
+    except Exception as e:
+        debug_info["components"]["conversation_storage"] = f"❌ Failed: {str(e)}"
+    
+    return debug_info
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8077, reload=True)
