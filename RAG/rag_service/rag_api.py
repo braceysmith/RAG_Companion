@@ -166,12 +166,19 @@ async def startup_event():
         
         # Initialize conversation manager
         try:
+            print("🔍 Attempting to initialize conversation manager...")
             conversation_manager = ConversationManager(db)
             print("✅ Conversation manager initialized with database persistence")
         except Exception as cm_error:
             conversation_manager = None
             print(f"⚠️  Conversation manager initialization failed: {cm_error}")
+            print(f"Error type: {type(cm_error).__name__}")
+            print(f"Error details: {str(cm_error)}")
             print("🔄 RAG service will use fallback conversation storage")
+            
+            # Try to get more details about the error
+            import traceback
+            traceback.print_exc()
         
         print("✅ RAG service started successfully with PostgreSQL + pgvector")
         print(f"📊 Database URL: {database_url[:50]}...")
@@ -3240,6 +3247,37 @@ async def test_simple_query(request: dict):
         
     except Exception as e:
         return {"status": "error", "error": str(e)}
+
+@app.get("/force-init-conversations")
+async def force_init_conversations():
+    """Force initialize conversation tables if they don't exist"""
+    try:
+        if not database_available:
+            return {"error": "Database not available"}
+        
+        # Force create conversation tables
+        await db.initialize()
+        
+        # Try to initialize conversation manager again
+        global conversation_manager
+        try:
+            conversation_manager = ConversationManager(db)
+            print("✅ Conversation manager initialized successfully")
+            return {
+                "status": "success",
+                "message": "Conversation tables and manager initialized",
+                "conversation_manager": "active"
+            }
+        except Exception as cm_error:
+            print(f"❌ Conversation manager initialization failed: {cm_error}")
+            return {
+                "status": "partial",
+                "message": "Tables created but manager failed",
+                "error": str(cm_error)
+            }
+            
+    except Exception as e:
+        return {"error": f"Initialization failed: {str(e)}"}
 
 if __name__ == "__main__":
     import uvicorn
