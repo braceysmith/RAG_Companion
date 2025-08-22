@@ -3404,6 +3404,31 @@ async def force_init_conversations():
     except Exception as e:
         return {"error": f"Initialization failed: {str(e)}"}
 
+@app.get("/force-init-needs-db")
+async def force_init_needs_database():
+    """Force initialize needs database tables if they don't exist"""
+    try:
+        if not needs_db:
+            return {"error": "needs_db is None"}
+        
+        # Force create needs database tables
+        success = await needs_db.initialize()
+        
+        if success:
+            return {
+                "status": "success",
+                "message": "Needs database tables initialized successfully",
+                "tables_created": True
+            }
+        else:
+            return {
+                "status": "error",
+                "message": "Failed to initialize needs database tables"
+            }
+            
+    except Exception as e:
+        return {"error": f"Needs database initialization failed: {str(e)}"}
+
 @app.get("/debug-components")
 async def debug_components():
     """Debug endpoint to test individual components"""
@@ -3482,11 +3507,25 @@ async def test_needs_database():
         
         # Test basic connection
         try:
+            from datetime import datetime, timezone
             test_count = await needs_db.get_user_count()
+            
+            # Test reminder storage specifically
+            test_reminder_data = {
+                'text': 'Test reminder from debug endpoint',
+                'type': 'debug',
+                'due_date': datetime.now(timezone.utc),
+                'priority': 'high',
+                'needs_context': {}
+            }
+            
+            reminder_stored = await needs_db.store_user_reminder("debug-user", test_reminder_data)
+            
             return {
                 "status": "success",
                 "message": "Needs database is working",
                 "user_count": test_count,
+                "reminder_stored": reminder_stored,
                 "needs_db_type": str(type(needs_db)),
                 "database_url": str(needs_db.database_url)[:50] + "..." if hasattr(needs_db, 'database_url') else "No database_url"
             }
@@ -3496,6 +3535,56 @@ async def test_needs_database():
                 "message": f"Needs database test failed: {str(e)}",
                 "error_type": str(type(e).__name__),
                 "needs_db_type": str(type(needs_db))
+            }
+            
+    except Exception as e:
+        return {"status": "error", "message": f"Test failed: {str(e)}"}
+
+@app.get("/test-table-creation")
+async def test_table_creation():
+    """Test if we can create the user_reminders table manually"""
+    try:
+        if not needs_db:
+            return {"status": "error", "message": "needs_db is None"}
+        
+        # Try to create the table manually
+        try:
+            async with await psycopg.AsyncConnection.connect(needs_db.database_url) as conn:
+                async with conn.cursor() as cur:
+                    # Check if table exists
+                    await cur.execute("""
+                        SELECT EXISTS (
+                            SELECT FROM information_schema.tables 
+                            WHERE table_name = 'user_reminders'
+                        );
+                    """)
+                    table_exists = await cur.fetchone()
+                    
+                    if not table_exists[0]:
+                        # Create the table
+                        await cur.execute("""
+                            CREATE TABLE IF NOT EXISTS user_reminders (
+                                id SERIAL PRIMARY KEY,
+                                user_id TEXT NOT NULL,
+                                reminder_text TEXT NOT NULL,
+                                reminder_type TEXT,
+                                due_date TIMESTAMP WITH TIME ZONE,
+                                priority TEXT DEFAULT 'medium',
+                                status TEXT DEFAULT 'pending',
+                                needs_context JSONB,
+                                created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+                            )
+                        """)
+                        await conn.commit()
+                        return {"status": "success", "message": "Table created successfully", "table_existed": False}
+                    else:
+                        return {"status": "success", "message": "Table already exists", "table_existed": True}
+                        
+        except Exception as e:
+            return {
+                "status": "error", 
+                "message": f"Table creation failed: {str(e)}",
+                "error_type": str(type(e).__name__)
             }
             
     except Exception as e:
