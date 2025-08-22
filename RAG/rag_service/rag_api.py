@@ -1114,7 +1114,7 @@ async def generate_conversational_response(user_id: str, query: str, personal_in
     try:
         # Get user profile and conversation context
         user_profile = user_profiles.get(user_id, {})
-        conversation_context = get_conversation_context(user_id)
+        conversation_context = await get_conversation_context(user_id)
         
         # Check for due reminders
         due_reminders = get_due_reminders(user_id)
