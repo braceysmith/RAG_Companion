@@ -259,7 +259,7 @@ class NeedsDatabase:
                     
         except Exception as e:
             print(f"❌ Failed to get user reminders: {str(e)}")
-                                return []
+            return []
     
     async def mark_reminder_triggered(self, reminder_id: str) -> bool:
         """Mark a reminder as triggered"""
@@ -279,6 +279,55 @@ class NeedsDatabase:
             print(f"❌ Failed to mark reminder as triggered: {str(e)}")
             return False
     
+    async def get_user_profile(self, user_id: str) -> dict:
+        """Get user profile from database"""
+        try:
+            async with await psycopg.AsyncConnection.connect(self.database_url) as conn:
+                async with conn.cursor() as cur:
+                    await cur.execute("""
+                        SELECT metadata FROM user_memory 
+                        WHERE user_id = %s AND memory_type = 'profile'
+                        ORDER BY updated_at DESC LIMIT 1
+                    """, (user_id,))
+                    
+                    row = await cur.fetchone()
+                    if row and row[0]:
+                        return row[0]  # metadata contains the profile data
+                    return {}
+        except Exception as e:
+            print(f"❌ Failed to get user profile: {str(e)}")
+            return {}
+    
+    async def get_user_count(self) -> int:
+        """Get total count of users with profiles"""
+        try:
+            async with await psycopg.AsyncConnection.connect(self.database_url) as conn:
+                async with conn.cursor() as cur:
+                    await cur.execute("""
+                        SELECT COUNT(DISTINCT user_id) FROM user_memory 
+                        WHERE memory_type = 'profile'
+                    """)
+                    result = await cur.fetchone()
+                    return result[0] if result else 0
+        except Exception as e:
+            print(f"❌ Failed to get user count: {str(e)}")
+            return 0
+    
+    async def get_active_reminders_count(self) -> int:
+        """Get count of active (pending) reminders"""
+        try:
+            async with await psycopg.AsyncConnection.connect(self.database_url) as conn:
+                async with conn.cursor() as cur:
+                    await cur.execute("""
+                        SELECT COUNT(*) FROM user_reminders 
+                        WHERE status = 'pending'
+                    """)
+                    result = await cur.fetchone()
+                    return result[0] if result else 0
+        except Exception as e:
+            print(f"❌ Failed to get active reminders count: {str(e)}")
+            return 0
+    
     async def log_progress_change(self, user_id: str, category: str, old_tier: int, 
                                  new_tier: int, change_reason: str = None) -> bool:
         """Log a change in user's needs progress"""
@@ -296,6 +345,23 @@ class NeedsDatabase:
                     
         except Exception as e:
             print(f"❌ Failed to log progress change: {str(e)}")
+            return False
+    
+    async def delete_user_reminder(self, reminder_id: str) -> bool:
+        """Delete a user reminder"""
+        try:
+            async with await psycopg.AsyncConnection.connect(self.database_url) as conn:
+                async with conn.cursor() as cur:
+                    await cur.execute("""
+                        DELETE FROM user_reminders 
+                        WHERE id = %s
+                    """, (reminder_id,))
+                    
+                    await conn.commit()
+                    return True
+                    
+        except Exception as e:
+            print(f"❌ Failed to delete user reminder: {str(e)}")
             return False
     
     async def get_user_progress_history(self, user_id: str, category: str = None) -> List[Dict]:

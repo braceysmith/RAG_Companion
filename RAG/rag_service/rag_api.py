@@ -192,15 +192,44 @@ async def startup_event():
 @app.get("/health")
 async def health_check():
     """Health check endpoint"""
-    return {
-        "status": "healthy", 
-        "service": "RAG Companion Service",
-        "database_available": database_available,
-        "vector_search": "postgresql_pgvector" if database_available else "fallback_mode",
-        "conversation_manager": "active" if conversation_manager else "inactive",
-        "stored_users": len(user_profiles),
-        "active_reminders": sum(len(reminders) for reminders in user_reminders.values())
-    }
+    try:
+        # Get user count from database if available
+        stored_users = 0
+        active_reminders = 0
+        
+        if database_available and needs_db:
+            try:
+                # Get user count from profiles table
+                stored_users = await needs_db.get_user_count()
+            except:
+                stored_users = 0
+            
+            try:
+                # Get active reminders count
+                active_reminders = await needs_db.get_active_reminders_count()
+            except:
+                active_reminders = 0
+        
+        return {
+            "status": "healthy", 
+            "service": "RAG Companion Service",
+            "database_available": database_available,
+            "vector_search": "postgresql_pgvector" if database_available else "fallback_mode",
+            "conversation_manager": "active" if conversation_manager else "inactive",
+            "stored_users": stored_users,
+            "active_reminders": active_reminders
+        }
+    except Exception as e:
+        return {
+            "status": "healthy", 
+            "service": "RAG Companion Service",
+            "database_available": database_available,
+            "vector_search": "postgresql_pgvector" if database_available else "fallback_mode",
+            "conversation_manager": "active" if conversation_manager else "inactive",
+            "stored_users": 0,
+            "active_reminders": 0,
+            "error": str(e)
+        }
 
 @app.post("/test")
 def test_endpoint(request: dict):
@@ -208,17 +237,24 @@ def test_endpoint(request: dict):
     return {"message": f"Received: {request.get('query', 'no query')}", "status": "success"}
 
 @app.get("/debug")
-def debug_endpoint():
+async def debug_endpoint():
     """Debug endpoint to check basic functionality"""
     try:
         import time
+        stored_users = 0
+        if database_available and needs_db:
+            try:
+                stored_users = await needs_db.get_user_count()
+            except:
+                stored_users = 0
+        
         return {
             "status": "ok",
             "timestamp": int(time.time()),
             "message": "API is responding",
             "openai_configured": bool(os.getenv("OPENAI_API_KEY")),
             "database_url": bool(os.getenv("DATABASE_URL")),
-            "stored_users": len(user_profiles)
+            "stored_users": stored_users
         }
     except Exception as e:
         return {"status": "error", "error": str(e)}
@@ -247,10 +283,14 @@ def get_server_time():
         return {"status": "error", "message": f"Failed to get server time: {str(e)}"}
 
 @app.get("/user/{user_id}/profile")
-def get_user_profile_simple(user_id: str):
+async def get_user_profile_simple(user_id: str):
     """Get stored profile information for a user"""
     try:
-        profile = user_profiles.get(user_id, {})
+        if database_available and needs_db:
+            profile = await needs_db.get_user_profile(user_id)
+        else:
+            profile = {}
+        
         return {
             "user_id": user_id,
             "profile": profile,
@@ -277,7 +317,12 @@ async def websocket_realtime_endpoint(websocket: WebSocket, user_id: str):
     await websocket.accept()
     try:
         # Get user profile for context
-        user_profile = user_profiles.get(user_id, {})
+        user_profile = {}
+        if database_available and needs_db:
+            try:
+                user_profile = await needs_db.get_user_profile(user_id)
+            except:
+                user_profile = {}
         
         # Handle real-time WebSocket communication
         await audio_handler.handle_realtime_websocket(websocket, user_id, user_profile)
@@ -812,7 +857,7 @@ def parse_reminder_request(remainder: str, pattern_type: str) -> dict:
         
     return None
 
-def store_reminder(user_id: str, reminder_data: dict) -> str:
+async def store_reminder(user_id: str, reminder_data: dict) -> str:
     """Store a reminder for a user"""
     import uuid
     from datetime import datetime, timezone
@@ -829,12 +874,25 @@ def store_reminder(user_id: str, reminder_data: dict) -> str:
         "user_id": user_id
     }
     
-    if user_id not in user_reminders:
-        user_reminders[user_id] = []
-    
-    user_reminders[user_id].append(reminder)
-    
-    print(f"📅 Stored reminder for {user_id}: '{reminder['content']}' at {reminder['datetime']}")
+    # Store reminder in database instead of in-memory
+    try:
+        if needs_db:
+            success = await needs_db.store_user_reminder(
+                user_id=user_id,
+                reminder_text=reminder['content'],
+                reminder_type='general',
+                due_date=reminder['datetime'],
+                priority='medium',
+                needs_context={}
+            )
+            if success:
+                print(f"📅 Stored reminder for {user_id} in database: '{reminder['content']}' at {reminder['datetime']}")
+            else:
+                print(f"❌ Failed to store reminder for {user_id} in database")
+        else:
+            print(f"⚠️  Database not available, reminder not stored: '{reminder['content']}'")
+    except Exception as e:
+        print(f"❌ Error storing reminder in database: {e}")
     
     return reminder_id
 
@@ -1301,7 +1359,7 @@ async def rag_query_sync(request: dict):
             # Handle reminder requests specially
             if "reminder_request" in personal_info:
                 reminder_data = personal_info["reminder_request"]
-                reminder_id = store_reminder(user_id, reminder_data)
+                reminder_id = await store_reminder(user_id, reminder_data)
                 personal_info["reminder_created"] = {
                     "id": reminder_id,
                     "content": reminder_data["content"],
@@ -1484,7 +1542,7 @@ async def store_memory(request: MemoryRequest):
                 # Handle reminder requests specially
                 if "reminder_request" in personal_info:
                     reminder_data = personal_info["reminder_request"]
-                    reminder_id = store_reminder(request.user_id, reminder_data)
+                    reminder_id = await store_reminder(request.user_id, reminder_data)
                     personal_info["reminder_created"] = {
                         "id": reminder_id,
                         "content": reminder_data["content"],
@@ -1876,28 +1934,36 @@ async def check_reminders(user_id: str):
         return {"status": "error", "message": f"Reminder check failed: {str(e)}"}
 
 @app.get("/reminders/all/{user_id}")
-def get_all_reminders(user_id: str):
+async def get_all_reminders(user_id: str):
     """Get all reminders for a user"""
     try:
         from datetime import datetime, timezone
-        if user_id not in user_reminders:
+        
+        # Get reminders from database instead of in-memory storage
+        try:
+            reminders = await needs_db.get_user_reminders(user_id, "all")
+        except Exception as e:
+            print(f"❌ Error getting reminders from database: {e}")
+            return {"status": "error", "message": f"Failed to get reminders: {str(e)}"}
+        
+        if not reminders:
             return {"status": "success", "reminders": []}
         
         now_utc = datetime.now(timezone.utc)
         all_reminders = []
-        for reminder in user_reminders[user_id]:
-            reminder_time = reminder["datetime"]
+        for reminder in reminders:
+            reminder_time = reminder["due_date"]
             # Ensure reminder time is timezone-aware
             if reminder_time.tzinfo is None:
                 reminder_time = reminder_time.replace(tzinfo=timezone.utc)
             
             all_reminders.append({
                 "id": reminder["id"],
-                "content": reminder["content"],
-                "datetime": reminder["datetime"].isoformat(),
+                "content": reminder["text"],
+                "datetime": reminder["due_date"].isoformat(),
                 "created_at": reminder["created_at"].isoformat(),
-                "triggered": reminder["triggered"],
-                "status": "triggered" if reminder["triggered"] else ("due" if reminder_time <= now_utc else "pending")
+                "triggered": reminder.get("status") == "triggered",
+                "status": reminder.get("status", "pending")
             })
         
         return {
@@ -1910,21 +1976,24 @@ def get_all_reminders(user_id: str):
         return {"status": "error", "message": f"Failed to get reminders: {str(e)}"}
 
 @app.delete("/reminders/{user_id}/{reminder_id}")
-def delete_reminder(user_id: str, reminder_id: str):
+async def delete_reminder(user_id: str, reminder_id: str):
     """Delete a specific reminder"""
     try:
-        if user_id not in user_reminders:
-            return {"status": "error", "message": "No reminders found for user"}
-        
-        user_reminders[user_id] = [r for r in user_reminders[user_id] if r["id"] != reminder_id]
-        
-        return {"status": "success", "message": f"Reminder {reminder_id} deleted"}
+        # Delete reminder from database instead of in-memory storage
+        if needs_db:
+            success = await needs_db.delete_user_reminder(reminder_id)
+            if success:
+                return {"status": "success", "message": f"Reminder {reminder_id} deleted"}
+            else:
+                return {"status": "error", "message": f"Failed to delete reminder {reminder_id}"}
+        else:
+            return {"status": "error", "message": "Database not available"}
         
     except Exception as e:
         return {"status": "error", "message": f"Failed to delete reminder: {str(e)}"}
 
 @app.post("/reminders/test/{user_id}")
-def create_test_reminder(user_id: str):
+async def create_test_reminder(user_id: str):
     """Create an immediately due test reminder for testing"""
     try:
         from datetime import datetime, timezone
@@ -1940,13 +2009,25 @@ def create_test_reminder(user_id: str):
             "triggered": False
         }
         
-        # Store it
-        if user_id not in user_reminders:
-            user_reminders[user_id] = []
-        
-        user_reminders[user_id].append(test_reminder)
-        
-        print(f"🧪 Created test reminder for {user_id}: {test_reminder['content']}")
+        # Store it in database instead of in-memory
+        try:
+            if needs_db:
+                success = await needs_db.store_user_reminder(
+                    user_id=user_id,
+                    reminder_text=test_reminder['content'],
+                    reminder_type='test',
+                    due_date=test_reminder['datetime'],
+                    priority='high',
+                    needs_context={}
+                )
+                if success:
+                    print(f"🧪 Created test reminder for {user_id} in database: {test_reminder['content']}")
+                else:
+                    print(f"❌ Failed to create test reminder for {user_id} in database")
+            else:
+                print(f"⚠️  Database not available, test reminder not stored: {test_reminder['content']}")
+        except Exception as e:
+            print(f"❌ Error creating test reminder in database: {e}")
         
         return {
             "status": "success", 
