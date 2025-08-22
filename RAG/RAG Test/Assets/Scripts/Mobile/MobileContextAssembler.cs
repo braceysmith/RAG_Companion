@@ -81,7 +81,7 @@ public class MobileContextAssembler : MonoBehaviour
             if (conversationTokens <= tokenBudget.conversationTokens)
             {
                 contextBuilder.AppendLine(conversationContext);
-                tokensUsed += conversationTokens;
+                tokensUsed += systemTokens;
             }
             else
             {
@@ -102,7 +102,7 @@ public class MobileContextAssembler : MonoBehaviour
             }
             else
             {
-                // Prioritize and truncate knowledge
+                // Truncate knowledge context to fit budget
                 string truncatedKnowledge = TruncateKnowledgeContext(knowledgeResults, tokenBudget.knowledgeTokens);
                 contextBuilder.AppendLine(truncatedKnowledge);
                 tokensUsed += tokenBudget.knowledgeTokens;
@@ -120,27 +120,70 @@ public class MobileContextAssembler : MonoBehaviour
             
             // 5. Current Query Context
             string queryContext = BuildQueryContext(userQuery);
-            contextBuilder.AppendLine(queryContext);
-            tokensUsed += EstimateTokens(queryContext);
+            int queryTokens = EstimateTokens(queryContext);
             
-            string finalContext = contextBuilder.ToString();
+            if (queryTokens <= tokenBudget.bufferTokens)
+            {
+                contextBuilder.AppendLine(queryContext);
+                tokensUsed += queryTokens;
+            }
             
-            // Cache the result
+            // Cache the assembled context
             if (enableContextCaching)
             {
                 string cacheKey = GenerateCacheKey(userId, userQuery, knowledgeResults);
-                CacheContext(cacheKey, finalContext);
+                string assembledContext = contextBuilder.ToString();
+                CacheContext(cacheKey, assembledContext);
             }
             
-            totalTokensUsed = tokensUsed;
-            LogMessage($"Mobile context assembled: {tokensUsed} tokens used");
+            totalTokensUsed += tokensUsed;
+            LogMessage($"Context assembled: {tokensUsed} tokens used, total: {totalTokensUsed}");
             
-            return finalContext;
+            return contextBuilder.ToString();
         }
         catch (Exception ex)
         {
-            LogError($"Context assembly failed: {ex.Message}");
+            LogError($"Error assembling context: {ex.Message}");
             return BuildFallbackContext(userQuery);
+        }
+    }
+
+    public void UpdateConversationHistory(string userId, string userMessage, string assistantMessage)
+    {
+        try
+        {
+            // Add to local conversation history
+            var newTurn = new ConversationTurn(
+                Guid.NewGuid().ToString(), // id
+                "user", // role
+                userMessage, // content
+                EstimateTokens(userMessage), // token count
+                new string[0] // retrieved chunks
+            );
+            
+            mobileConversationHistory.Enqueue(newTurn);
+            
+            var assistantTurn = new ConversationTurn(
+                Guid.NewGuid().ToString(), // id
+                "assistant", // role
+                assistantMessage, // content
+                EstimateTokens(assistantMessage), // token count
+                new string[0] // retrieved chunks
+            );
+            
+            mobileConversationHistory.Enqueue(assistantTurn);
+            
+            // Keep only recent conversations
+            while (mobileConversationHistory.Count > maxMobileConversationTurns * 2)
+            {
+                mobileConversationHistory.Dequeue();
+            }
+            
+            LogMessage($"Updated conversation history for {userId}: {mobileConversationHistory.Count} turns");
+        }
+        catch (Exception ex)
+        {
+            LogError($"Error updating conversation history: {ex.Message}");
         }
     }
     
@@ -158,33 +201,76 @@ You are a helpful AI assistant optimized for mobile devices. Keep responses conc
     
     private string BuildMobileConversationContext(string userId)
     {
-        if (mobileConversationHistory.Count == 0)
+        try
         {
-            return "<conversation_history>\nNo previous conversation.\n</conversation_history>";
+            // Try to get conversation history from the conversation cache
+            var conversationCache = FindObjectOfType<MobileConversationCache>();
+            if (conversationCache != null)
+            {
+                // Get recent conversations from cache
+                var recentConversations = conversationCache.GetRecentConversationsAsync(userId, maxMobileConversationTurns);
+                
+                if (recentConversations != null && recentConversations.Count > 0)
+                {
+                    var contextBuilder = new System.Text.StringBuilder();
+                    contextBuilder.AppendLine("<conversation_history>");
+                    
+                    foreach (var conv in recentConversations.Take(maxMobileConversationTurns))
+                    {
+                        if (enableCompression)
+                        {
+                            string compressedUser = CompressText(conv.userMessage);
+                            string compressedAssistant = CompressText(conv.assistantMessage);
+                            contextBuilder.AppendLine($"User: {compressedUser}");
+                            contextBuilder.AppendLine($"Assistant: {compressedAssistant}");
+                        }
+                        else
+                        {
+                            contextBuilder.AppendLine($"User: {conv.userMessage}");
+                            contextBuilder.AppendLine($"Assistant: {conv.assistantMessage}");
+                        }
+                    }
+                    
+                    contextBuilder.AppendLine("</conversation_history>");
+                    LogMessage($"Built conversation context with {recentConversations.Count} recent conversations");
+                    return contextBuilder.ToString();
+                }
+            }
+            
+            // Fallback to local conversation history
+            if (mobileConversationHistory.Count == 0)
+            {
+                return "<conversation_history>\nNo previous conversation.\n</conversation_history>";
+            }
+            
+            var localContextBuilder = new System.Text.StringBuilder();
+            localContextBuilder.AppendLine("<conversation_history>");
+            
+            // Get recent turns (limited for mobile)
+            var recentTurns = mobileConversationHistory.TakeLast(maxMobileConversationTurns);
+            
+            foreach (var turn in recentTurns)
+            {
+                if (enableCompression)
+                {
+                    // Compress conversation for mobile
+                    string compressedUser = CompressText(turn.content);
+                    localContextBuilder.AppendLine($"User: {compressedUser}");
+                }
+                else
+                {
+                    localContextBuilder.AppendLine($"{turn.role}: {turn.content}");
+                }
+            }
+            
+            localContextBuilder.AppendLine("</conversation_history>");
+            return localContextBuilder.ToString();
         }
-        
-        var contextBuilder = new System.Text.StringBuilder();
-        contextBuilder.AppendLine("<conversation_history>");
-        
-        // Get recent turns (limited for mobile)
-        var recentTurns = mobileConversationHistory.TakeLast(maxMobileConversationTurns);
-        
-        foreach (var turn in recentTurns)
+        catch (Exception ex)
         {
-            if (enableCompression)
-            {
-                // Compress conversation for mobile
-                string compressedUser = CompressText(turn.content);
-                contextBuilder.AppendLine($"User: {compressedUser}");
-            }
-            else
-            {
-                contextBuilder.AppendLine($"{turn.role}: {turn.content}");
-            }
+            LogError($"Error building conversation context: {ex.Message}");
+            return "<conversation_history>\nError loading conversation history.\n</conversation_history>";
         }
-        
-        contextBuilder.AppendLine("</conversation_history>");
-        return contextBuilder.ToString();
     }
     
     private string BuildMobileKnowledgeContext(List<RAGResult> knowledgeResults)

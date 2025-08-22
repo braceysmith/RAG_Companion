@@ -256,6 +256,21 @@ public class MobileRAGCompanionSystem : MonoBehaviour
             
             LogMessage("Performing initial sync...");
             
+            // Load conversations from cloud first
+            if (networkManager.IsConnected)
+            {
+                LogMessage("Loading conversations from cloud...");
+                bool loadedFromCloud = await conversationCache.LoadConversationsFromCloudAsync(userId, 20);
+                if (loadedFromCloud)
+                {
+                    LogMessage("Successfully loaded conversations from cloud");
+                }
+                else
+                {
+                    LogMessage("Failed to load conversations from cloud, using local cache only");
+                }
+            }
+            
             // Sync unsynced conversations
             var unsyncedConversations = conversationCache.GetUnsyncedConversationsAsync(50);
             
@@ -331,6 +346,12 @@ public class MobileRAGCompanionSystem : MonoBehaviour
             if (conversationCache != null)
             {
                 await conversationCache.StoreConversationAsync(userId, message, response, null);
+            }
+            
+            // Update conversation history in context assembler
+            if (contextAssembler != null)
+            {
+                contextAssembler.UpdateConversationHistory(userId, message, response);
             }
             
             // Track performance
@@ -535,6 +556,14 @@ public class MobileRAGCompanionSystem : MonoBehaviour
                 return;
             }
             
+            if (isProcessingRequest)
+            {
+                LogMessage("Already processing request - queuing voice input");
+                // Queue the voice input for later processing
+                requestQueue.Enqueue("[Voice Input]");
+                return;
+            }
+            
             isProcessingRequest = true;
             OnUserMessage?.Invoke("[Voice Input]");
             
@@ -550,6 +579,12 @@ public class MobileRAGCompanionSystem : MonoBehaviour
                 if (conversationCache != null)
                 {
                     await conversationCache.StoreConversationAsync(userId, voiceResponse.transcript, voiceResponse.response_text, null);
+                }
+                
+                // Update conversation history in context assembler
+                if (contextAssembler != null)
+                {
+                    contextAssembler.UpdateConversationHistory(userId, voiceResponse.transcript, voiceResponse.response_text);
                 }
                 
                 // Invoke response events
@@ -586,7 +621,13 @@ public class MobileRAGCompanionSystem : MonoBehaviour
         finally
         {
             isProcessingRequest = false;
+            // Process any queued messages
             ProcessNextQueuedMessage();
+            // Reset audio recording state
+            if (audioManager != null)
+            {
+                audioManager.ResetRecordingState();
+            }
         }
     }
     
@@ -609,6 +650,11 @@ public class MobileRAGCompanionSystem : MonoBehaviour
             ragClient.SetCloudApiUrl(newUrl);
         }
         LogMessage($"Cloud RAG URL set to: {newUrl}");
+    }
+    
+    public string GetCloudRAGUrl()
+    {
+        return cloudRAGUrl;
     }
     
     public void ToggleOfflineMode(bool enabled)

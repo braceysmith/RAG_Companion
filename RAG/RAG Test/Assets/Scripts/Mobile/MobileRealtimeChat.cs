@@ -1189,6 +1189,9 @@ public class MobileRealtimeChat : MonoBehaviour
             companionUI.ShowAudioPlaybackIndicator(false);
             companionUI.ShowProcessingIndicator(false);
             companionUI.UpdateStatusText("Ready - Tap to talk");
+            
+            // Reset the conversation state to Idle so the MIC Talk button works again
+            companionUI.ResetToIdleState();
         }
         
         // Add safety timeout to ensure UI resets even if audio events are missed
@@ -1208,6 +1211,9 @@ public class MobileRealtimeChat : MonoBehaviour
             companionUI.ShowAudioPlaybackIndicator(false);
             companionUI.ShowProcessingIndicator(false);
             companionUI.UpdateStatusText("Ready - Tap to talk");
+            
+            // Reset the conversation state to Idle so the MIC Talk button works again
+            companionUI.ResetToIdleState();
         }
     }
     
@@ -1268,6 +1274,9 @@ public class MobileRealtimeChat : MonoBehaviour
         {
             companionUI.ShowProcessingIndicator(false);
             companionUI.ShowAudioPlaybackIndicator(false);
+            
+            // Reset the conversation state to Idle so the MIC Talk button works again
+            companionUI.ResetToIdleState();
         }
     }
     

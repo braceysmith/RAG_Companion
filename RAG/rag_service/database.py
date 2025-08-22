@@ -381,7 +381,7 @@ class RAGDatabase:
                         "memory_id": memory_id,
                         "user_id": user_id,
                         "content": content,
-                        "metadata": profile_data
+                        "metadata": json.dumps(profile_data)  # Convert dict to JSON string
                     })
                     await conn.commit()
         except Exception as e:

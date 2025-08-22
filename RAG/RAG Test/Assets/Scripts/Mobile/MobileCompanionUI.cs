@@ -1856,6 +1856,13 @@ public class MobileCompanionUI : MonoBehaviour
     private void OnAudioError(string error)
     {
         ShowError($"Audio error: {error}");
+        
+        // Reset to idle state when there's an error so the MIC Talk button works again
+        if (currentState != ConversationState.Idle)
+        {
+            LogMessage("Resetting to idle state due to audio error");
+            SetState(ConversationState.Idle);
+        }
     }
     
     // Companion System Event Handlers
@@ -1873,11 +1880,33 @@ public class MobileCompanionUI : MonoBehaviour
         LogMessage($"Assistant response received: {response.Substring(0, Math.Min(50, response.Length))}...");
         AddMessage(response, "assistant");
         SetState(ConversationState.PlayingAudio);
+        
+        // Reset to idle state after a delay so the MIC Talk button works again
+        StartCoroutine(ResetToIdleAfterDelay(3f));
+    }
+    
+    private IEnumerator ResetToIdleAfterDelay(float delay)
+    {
+        yield return new WaitForSeconds(delay);
+        
+        // Only reset if we're still in PlayingAudio state (not interrupted)
+        if (currentState == ConversationState.PlayingAudio)
+        {
+            LogMessage("Resetting to idle state after assistant response");
+            SetState(ConversationState.Idle);
+        }
     }
     
     private void OnSystemError(string error)
     {
         ShowError($"System error: {error}");
+        
+        // Reset to idle state when there's an error so the MIC Talk button works again
+        if (currentState != ConversationState.Idle)
+        {
+            LogMessage("Resetting to idle state due to system error");
+            SetState(ConversationState.Idle);
+        }
     }
     
     private void OnSystemStatusChanged(bool isReady)
@@ -2011,6 +2040,13 @@ public class MobileCompanionUI : MonoBehaviour
                 StopCoroutine(connectionTimeoutCoroutine);
                 connectionTimeoutCoroutine = null;
             }
+        }
+        
+        // Reset to idle state when there's an error so the MIC Talk button works again
+        if (currentState != ConversationState.Idle)
+        {
+            LogMessage("Resetting to idle state due to realtime error");
+            SetState(ConversationState.Idle);
         }
     }
     

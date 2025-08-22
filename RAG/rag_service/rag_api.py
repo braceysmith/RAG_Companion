@@ -838,61 +838,69 @@ def store_reminder(user_id: str, reminder_data: dict) -> str:
     
     return reminder_id
 
-def get_due_reminders(user_id: str) -> list:
+async def get_due_reminders(user_id: str) -> list:
     """Get reminders that are due for a user"""
     from datetime import datetime, timezone
     
-    if user_id not in user_reminders:
+    try:
+        # Use database instead of in-memory storage
+        reminders = await needs_db.get_user_reminders(user_id, "pending")
+        
+        due_reminders = []
+        now = datetime.now(timezone.utc)
+        
+        print(f"🕐 Checking reminders at {now} UTC")
+        print(f"🔍 User {user_id} has {len(reminders)} total reminders")
+        
+        for reminder in reminders:
+            reminder_time = reminder["datetime"]
+            
+            # Ensure both times are timezone-aware for proper comparison
+            if reminder_time.tzinfo is None:
+                # If reminder time is naive, assume it's UTC
+                reminder_time = reminder_time.replace(tzinfo=timezone.utc)
+            
+            is_due = reminder_time <= now
+            time_diff = (reminder_time - now).total_seconds()
+            print(f"  📝 Reminder: '{reminder['content']}' due at {reminder_time}, triggered: {reminder['triggered']}, is_due: {is_due}")
+            print(f"    ⏱️  Time difference: {time_diff:.1f} seconds ({time_diff/60:.1f} minutes)")
+            
+            if not reminder["triggered"] and is_due:
+                due_reminders.append(reminder)
+                print(f"  ✅ Found due reminder: {reminder['id']} (not yet triggered)")
+        
+        print(f"📅 Found {len(due_reminders)} due reminders")
+        return due_reminders
+    except Exception as e:
+        print(f"❌ ERROR in get_due_reminders for user {user_id}: {e}")
         return []
-    
-    due_reminders = []
-    now = datetime.now(timezone.utc)
-    
-    print(f"🕐 Checking reminders at {now} UTC")
-    print(f"🔍 User {user_id} has {len(user_reminders[user_id])} total reminders")
-    
-    for reminder in user_reminders[user_id]:
-        reminder_time = reminder["datetime"]
-        
-        # Ensure both times are timezone-aware for proper comparison
-        if reminder_time.tzinfo is None:
-            # If reminder time is naive, assume it's UTC
-            reminder_time = reminder_time.replace(tzinfo=timezone.utc)
-        
-        is_due = reminder_time <= now
-        time_diff = (reminder_time - now).total_seconds()
-        print(f"  📝 Reminder: '{reminder['content']}' due at {reminder_time}, triggered: {reminder['triggered']}, is_due: {is_due}")
-        print(f"    ⏱️  Time difference: {time_diff:.1f} seconds ({time_diff/60:.1f} minutes)")
-        
-        if not reminder["triggered"] and is_due:
-            due_reminders.append(reminder)
-            print(f"  ✅ Found due reminder: {reminder['id']} (not yet triggered)")
-    
-    print(f"📅 Found {len(due_reminders)} due reminders")
-    return due_reminders
 
-def get_pending_reminders(user_id: str) -> list:
+async def get_pending_reminders(user_id: str) -> list:
     """Get all pending (future) reminders for a user"""
     from datetime import datetime, timezone
     
-    if user_id not in user_reminders:
+    try:
+        # Use database instead of in-memory storage
+        reminders = await needs_db.get_user_reminders(user_id, "pending")
+        
+        pending_reminders = []
+        now = datetime.now(timezone.utc)
+        
+        for reminder in reminders:
+            reminder_time = reminder["datetime"]
+            
+            # Ensure both times are timezone-aware for proper comparison
+            if reminder_time.tzinfo is None:
+                # If reminder time is naive, assume it's UTC
+                reminder_time = reminder_time.replace(tzinfo=timezone.utc)
+            
+            if not reminder["triggered"] and reminder_time > now:
+                pending_reminders.append(reminder)
+        
+        return pending_reminders
+    except Exception as e:
+        print(f"❌ ERROR in get_pending_reminders for user {user_id}: {e}")
         return []
-    
-    pending_reminders = []
-    now = datetime.now(timezone.utc)
-    
-    for reminder in user_reminders[user_id]:
-        reminder_time = reminder["datetime"]
-        
-        # Ensure both times are timezone-aware for proper comparison
-        if reminder_time.tzinfo is None:
-            # If reminder time is naive, assume it's UTC
-            reminder_time = reminder_time.replace(tzinfo=timezone.utc)
-        
-        if not reminder["triggered"] and reminder_time > now:
-            pending_reminders.append(reminder)
-    
-    return pending_reminders
 
 async def store_conversation_turn(user_id: str, user_message: str, ai_response: str, 
                                 retrieved_chunks: List[str] = None, metadata: Dict[str, Any] = None):
@@ -1815,12 +1823,12 @@ async def ingest_directory(directory_path: Path, user_scope: str, safety_level: 
                 print(f"Error processing {file_path}: {e}")
 
 @app.get("/reminders/check/{user_id}")
-def check_reminders(user_id: str):
+async def check_reminders(user_id: str):
     """Check for due reminders for a user (called on app startup)"""
     try:
         from datetime import datetime, timezone
-        due_reminders = get_due_reminders(user_id)
-        pending_reminders = get_pending_reminders(user_id)
+        due_reminders = await get_due_reminders(user_id)
+        pending_reminders = await get_pending_reminders(user_id)
         
         now_utc = datetime.now(timezone.utc)
         
@@ -1961,14 +1969,21 @@ async def deliver_due_reminders(user_id: str):
         from datetime import datetime, timezone
         import asyncio
         
-        if user_id not in user_reminders:
+        # Get reminders from database instead of in-memory storage
+        try:
+            reminders = await needs_db.get_user_reminders(user_id, "pending")
+        except Exception as e:
+            print(f"❌ Error getting reminders from database: {e}")
+            return {"status": "error", "message": f"Failed to get reminders: {str(e)}"}
+        
+        if not reminders:
             return {"status": "no_reminders", "message": "No reminders found for user"}
         
         now = datetime.now(timezone.utc)
         due_reminders = []
         
         # Find all due reminders (not yet triggered)
-        for reminder in user_reminders[user_id]:
+        for reminder in reminders:
             reminder_time = reminder["datetime"]
             
             # Ensure both times are timezone-aware for proper comparison
@@ -2026,8 +2041,11 @@ Keep it conversational and personal. Don't mention "delivering reminders" - just
             
             # NOW mark reminders as triggered after successful AI generation
             for reminder in due_reminders:
-                reminder["triggered"] = True
-                print(f"✅ Marked reminder {reminder['id']} as triggered after successful AI delivery")
+                try:
+                    await needs_db.mark_reminder_triggered(reminder['id'])
+                    print(f"✅ Marked reminder {reminder['id']} as triggered after successful AI delivery")
+                except Exception as e:
+                    print(f"❌ Failed to mark reminder {reminder['id']} as triggered: {e}")
             
             # Store this as a conversation turn
             store_conversation_turn(user_id, "[User opened app - checking for reminders]", ai_message)

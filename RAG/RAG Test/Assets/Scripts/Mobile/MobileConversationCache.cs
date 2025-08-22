@@ -5,6 +5,25 @@ using System.Linq;
 using System.Threading.Tasks;
 using UnityEngine;
 using Newtonsoft.Json;
+using UnityEngine.Networking;
+
+[System.Serializable]
+public class CloudConversationResponse
+{
+    public string user_id;
+    public List<CloudConversation> conversations;
+    public int total_conversations;
+}
+
+[System.Serializable]
+public class CloudConversation
+{
+    public string id;
+    public string user_id;
+    public string user_message;
+    public string assistant_message;
+    public string timestamp;
+}
 
 [System.Serializable]
 public class CachedConversation
@@ -311,6 +330,81 @@ public class MobileConversationCache : MonoBehaviour
             LogError($"Failed to get recent conversations: {ex.Message}");
             cacheMisses++;
             return new List<CachedConversation>();
+        }
+    }
+    
+    public async Task<bool> LoadConversationsFromCloudAsync(string userId, int limit = 20)
+    {
+        if (!isInitialized)
+        {
+            LogError("Cache not initialized");
+            return false;
+        }
+        
+        try
+        {
+            LogMessage($"Loading conversations from cloud for user: {userId}");
+            
+            // Get cloud RAG URL from companion system
+            var companionSystem = FindObjectOfType<MobileRAGCompanionSystem>();
+            if (companionSystem == null)
+            {
+                LogError("Companion system not found");
+                return false;
+            }
+            
+            string cloudUrl = companionSystem.GetCloudRAGUrl();
+            string url = $"{cloudUrl}/conversations/{userId}?limit={limit}";
+            
+            using (var request = UnityWebRequest.Get(url))
+            {
+                var operation = request.SendWebRequest();
+                
+                while (!operation.isDone)
+                {
+                    await Task.Yield();
+                }
+                
+                if (request.result == UnityWebRequest.Result.Success)
+                {
+                    var response = JsonConvert.DeserializeObject<CloudConversationResponse>(request.downloadHandler.text);
+                    
+                    if (response != null && response.conversations != null)
+                    {
+                        LogMessage($"Loaded {response.conversations.Count} conversations from cloud");
+                        
+                        // Convert cloud conversations to local format and store
+                        foreach (var cloudConv in response.conversations)
+                        {
+                            var cachedConv = new CachedConversation
+                            {
+                                id = cloudConv.id,
+                                userId = cloudConv.user_id,
+                                userMessage = cloudConv.user_message,
+                                assistantMessage = cloudConv.assistant_message,
+                                timestamp = DateTime.Parse(cloudConv.timestamp),
+                                synced = true
+                            };
+                            
+                            // Store in local cache
+                            await StoreConversationAsync(cachedConv.userId, cachedConv.userMessage, cachedConv.assistantMessage, null);
+                        }
+                        
+                        return true;
+                    }
+                }
+                else
+                {
+                    LogError($"Failed to load conversations from cloud: {request.error}");
+                }
+            }
+            
+            return false;
+        }
+        catch (Exception ex)
+        {
+            LogError($"Failed to load conversations from cloud: {ex.Message}");
+            return false;
         }
     }
     

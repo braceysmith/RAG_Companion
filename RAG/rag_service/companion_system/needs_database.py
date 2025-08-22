@@ -259,7 +259,25 @@ class NeedsDatabase:
                     
         except Exception as e:
             print(f"❌ Failed to get user reminders: {str(e)}")
-            return []
+                                return []
+    
+    async def mark_reminder_triggered(self, reminder_id: str) -> bool:
+        """Mark a reminder as triggered"""
+        try:
+            async with await psycopg.AsyncConnection.connect(self.database_url) as conn:
+                async with conn.cursor() as cur:
+                    await cur.execute("""
+                        UPDATE user_reminders 
+                        SET status = 'triggered', updated_at = NOW()
+                        WHERE id = %s
+                    """, (reminder_id,))
+                    
+                    await conn.commit()
+                    return True
+                    
+        except Exception as e:
+            print(f"❌ Failed to mark reminder as triggered: {str(e)}")
+            return False
     
     async def log_progress_change(self, user_id: str, category: str, old_tier: int, 
                                  new_tier: int, change_reason: str = None) -> bool:

@@ -201,56 +201,73 @@ public class MobileAudioManager : MonoBehaviour
         
         try
         {
+            LogMessage("Stopping recording...");
+            
             // Stop microphone
             Microphone.End(microphoneDevice);
-            
             isRecording = false;
             
-            // Process recorded audio
+            // Get recorded data
             if (_recordedClip != null)
             {
-                ProcessRecordedAudio();
+                // Convert to WAV format
+                byte[] audioData = ConvertAudioClipToWAV(_recordedClip);
+                
+                LogMessage($"Recording stopped. Duration: {_recordedClip.length:F2}s, Size: {audioData.Length} bytes");
+                
+                // Notify listeners
+                OnAudioRecorded?.Invoke(audioData);
+                OnRecordingStopped?.Invoke();
+                
+                // Reset VAD state
+                isVoiceDetected = false;
+                lastVoiceTime = 0f;
+                voiceStartTime = 0f;
             }
-            
-            OnRecordingStopped?.Invoke();
-            LogMessage("Recording stopped");
+            else
+            {
+                LogMessage("No recorded clip available");
+            }
         }
-        catch (Exception ex)
+        catch (Exception e)
         {
-            LogError($"Failed to stop recording: {ex.Message}");
-            OnError?.Invoke($"Failed to stop recording: {ex.Message}");
+            LogError($"Error stopping recording: {e.Message}");
+            OnError?.Invoke($"Recording stop failed: {e.Message}");
         }
+    }
+
+    public void ResetRecordingState()
+    {
+        LogMessage("Resetting recording state...");
+        
+        // Reset recording flags
+        isRecording = false;
+        isPlaying = false;
+        
+        // Reset VAD state
+        isVoiceDetected = false;
+        lastVoiceTime = 0f;
+        voiceStartTime = 0f;
+        
+        // Clear recorded clip
+        if (_recordedClip != null)
+        {
+            DestroyImmediate(_recordedClip);
+            _recordedClip = null;
+        }
+        
+        // Clear audio buffer
+        audioBuffer.Clear();
+        
+        // Reset timing
+        recordingStartTime = 0f;
+        lastVoiceTime = 0f;
+        voiceStartTime = 0f;
+        
+        LogMessage("Recording state reset complete");
     }
     
-    private void ProcessRecordedAudio()
-    {
-        try
-        {
-            // Get audio samples
-            float[] samples = new float[_recordedClip.samples * _recordedClip.channels];
-            _recordedClip.GetData(samples, 0);
-            
-            // Apply noise reduction if enabled
-            if (enableNoiseReduction)
-            {
-                samples = ApplyNoiseReduction(samples);
-            }
-            
-            // Convert to bytes
-            byte[] audioBytes = ConvertFloatsToBytes(samples);
-            
-            // Notify listeners
-            OnAudioSamples?.Invoke(samples);
-            OnAudioRecorded?.Invoke(audioBytes);
-            
-            LogMessage($"Audio processed: {audioBytes.Length} bytes, {samples.Length} samples");
-        }
-        catch (Exception ex)
-        {
-            LogError($"Failed to process recorded audio: {ex.Message}");
-            OnError?.Invoke($"Failed to process recorded audio: {ex.Message}");
-        }
-    }
+    // ProcessRecordedAudio method removed - audio processing now handled directly in StopRecording
     
     private float[] ApplyNoiseReduction(float[] samples)
     {
