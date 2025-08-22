@@ -390,6 +390,16 @@ public class MobileConversationCache : MonoBehaviour
                             await StoreConversationAsync(cachedConv.userId, cachedConv.userMessage, cachedConv.assistantMessage, null);
                         }
                         
+                        // Notify UI to populate chat with loaded conversations
+                        if (response.conversations.Count > 0)
+                        {
+                            var companionUI = FindObjectOfType<MobileCompanionUI>();
+                            if (companionUI != null)
+                            {
+                                companionUI.PopulateChatWithHistory(response.conversations);
+                            }
+                        }
+                        
                         return true;
                     }
                 }

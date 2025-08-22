@@ -1,6 +1,7 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Linq;
 using UnityEngine;
 using UnityEngine.UI;
 using UnityEngine.Networking;
@@ -2086,6 +2087,58 @@ public class MobileCompanionUI : MonoBehaviour
     }
     
     // Public methods for external state management
+    public void PopulateChatWithHistory(List<CloudConversation> conversations)
+    {
+        try
+        {
+            LogMessage($"Populating chat with {conversations.Count} loaded conversations");
+            
+            // Clear existing messages first
+            ClearChatMessages();
+            
+            // Add conversations in chronological order (oldest first)
+            var sortedConversations = conversations.OrderBy(c => DateTime.Parse(c.timestamp)).ToList();
+            
+            foreach (var conv in sortedConversations)
+            {
+                // Add user message
+                AddMessage(conv.user_message, "user", false);
+                
+                // Add assistant response
+                AddMessage(conv.assistant_message, "assistant", false);
+            }
+            
+            LogMessage($"Chat populated with {conversations.Count} conversations");
+        }
+        catch (Exception ex)
+        {
+            LogError($"Error populating chat with history: {ex.Message}");
+        }
+    }
+    
+    private void ClearChatMessages()
+    {
+        try
+        {
+            // Clear the chat display
+            if (chatContainer != null)
+            {
+                // Remove all child objects except the first few (keep some structure)
+                int childCount = chatContainer.childCount;
+                for (int i = childCount - 1; i >= 0; i--)
+                {
+                    DestroyImmediate(chatContainer.GetChild(i).gameObject);
+                }
+            }
+            
+            LogMessage("Chat messages cleared");
+        }
+        catch (Exception ex)
+        {
+            LogError($"Error clearing chat messages: {ex.Message}");
+        }
+    }
+    
     public void ResetToIdleState()
     {
         LogMessage("Resetting UI to idle state for next conversation turn");

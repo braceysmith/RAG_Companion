@@ -162,6 +162,18 @@ async def startup_event():
     global database_available, conversation_manager
     try:
         await db.initialize()
+        
+        # Initialize needs database tables
+        try:
+            print("🔍 Initializing needs database tables...")
+            needs_initialized = await needs_db.initialize()
+            if needs_initialized:
+                print("✅ Needs database tables initialized successfully")
+            else:
+                print("⚠️  Needs database tables initialization failed")
+        except Exception as needs_error:
+            print(f"❌ Needs database initialization error: {needs_error}")
+        
         database_available = True
         
         # Initialize conversation manager
@@ -877,14 +889,14 @@ async def store_reminder(user_id: str, reminder_data: dict) -> str:
     # Store reminder in database instead of in-memory
     try:
         if needs_db:
-            success = await needs_db.store_user_reminder(
-                user_id=user_id,
-                reminder_text=reminder['content'],
-                reminder_type='general',
-                due_date=reminder['datetime'],
-                priority='medium',
-                needs_context={}
-            )
+            reminder_data = {
+                'text': reminder['content'],
+                'type': 'general',
+                'due_date': reminder['datetime'],
+                'priority': 'medium',
+                'needs_context': {}
+            }
+            success = await needs_db.store_user_reminder(user_id, reminder_data)
             if success:
                 print(f"📅 Stored reminder for {user_id} in database: '{reminder['content']}' at {reminder['datetime']}")
             else:
@@ -2012,14 +2024,14 @@ async def create_test_reminder(user_id: str):
         # Store it in database instead of in-memory
         try:
             if needs_db:
-                success = await needs_db.store_user_reminder(
-                    user_id=user_id,
-                    reminder_text=test_reminder['content'],
-                    reminder_type='test',
-                    due_date=test_reminder['datetime'],
-                    priority='high',
-                    needs_context={}
-                )
+                reminder_data = {
+                    'text': test_reminder['content'],
+                    'type': 'test',
+                    'due_date': test_reminder['datetime'],
+                    'priority': 'high',
+                    'needs_context': {}
+                }
+                success = await needs_db.store_user_reminder(user_id, reminder_data)
                 if success:
                     print(f"🧪 Created test reminder for {user_id} in database: {test_reminder['content']}")
                 else:
@@ -2065,14 +2077,14 @@ async def deliver_due_reminders(user_id: str):
         
         # Find all due reminders (not yet triggered)
         for reminder in reminders:
-            reminder_time = reminder["datetime"]
+            reminder_time = reminder["due_date"]
             
             # Ensure both times are timezone-aware for proper comparison
             if reminder_time.tzinfo is None:
                 # If reminder time is naive, assume it's UTC
                 reminder_time = reminder_time.replace(tzinfo=timezone.utc)
             
-            if not reminder["triggered"] and reminder_time <= now:
+            if not reminder.get("status") == "triggered" and reminder_time <= now:
                 due_reminders.append(reminder)
                 # Don't mark as triggered yet - wait for successful delivery
         
@@ -2095,7 +2107,7 @@ async def deliver_due_reminders(user_id: str):
                 hours = int(time_overdue / 60)
                 timing = f"{hours} hour{'s' if hours > 1 else ''} ago"
             
-            reminder_context += f"{i}. \"{reminder['content']}\" (was due {timing})\n"
+            reminder_context += f"{i}. \"{reminder['text']}\" (was due {timing})\n"
         
         # Generate personalized AI response
         system_prompt = f"""You are delivering due reminders to the user{f' (their name is {user_name})' if user_name else ''}. 
@@ -2129,7 +2141,7 @@ Keep it conversational and personal. Don't mention "delivering reminders" - just
                     print(f"❌ Failed to mark reminder {reminder['id']} as triggered: {e}")
             
             # Store this as a conversation turn
-            store_conversation_turn(user_id, "[User opened app - checking for reminders]", ai_message)
+            await store_conversation_turn(user_id, "[User opened app - checking for reminders]", ai_message)
             
             return {
                 "status": "success",
@@ -2138,8 +2150,8 @@ Keep it conversational and personal. Don't mention "delivering reminders" - just
                 "reminder_details": [
                     {
                         "id": r["id"],
-                        "content": r["content"],
-                        "was_due": r["datetime"].isoformat()
+                        "content": r["text"],
+                        "was_due": r["due_date"].isoformat()
                     } for r in due_reminders
                 ]
             }
@@ -2148,7 +2160,7 @@ Keep it conversational and personal. Don't mention "delivering reminders" - just
             print(f"AI generation error: {ai_error}")
             # Fallback to simple message
             simple_message = f"Hi{f' {user_name}' if user_name else ''}! You have {len(due_reminders)} reminder{'s' if len(due_reminders) > 1 else ''}: "
-            simple_message += ", ".join([f'"{r["content"]}"' for r in due_reminders])
+            simple_message += ", ".join([f'"{r["text"]}"' for r in due_reminders])
             
             return {
                 "status": "success",
@@ -3434,7 +3446,46 @@ async def debug_components():
     except Exception as e:
         debug_info["components"]["conversation_storage"] = f"❌ Failed: {str(e)}"
     
+    # Test 6: Needs database
+    try:
+        if needs_db:
+            # Test if we can connect and query the needs database
+            test_count = await needs_db.get_user_count()
+            debug_info["components"]["needs_database"] = f"✅ Working (users: {test_count})"
+        else:
+            debug_info["components"]["needs_database"] = "❌ Not initialized"
+    except Exception as e:
+        debug_info["components"]["needs_database"] = f"❌ Error: {str(e)}"
+    
     return debug_info
+
+@app.get("/test-needs-db")
+async def test_needs_database():
+    """Test the needs database specifically"""
+    try:
+        if not needs_db:
+            return {"status": "error", "message": "needs_db is None"}
+        
+        # Test basic connection
+        try:
+            test_count = await needs_db.get_user_count()
+            return {
+                "status": "success",
+                "message": "Needs database is working",
+                "user_count": test_count,
+                "needs_db_type": str(type(needs_db)),
+                "database_url": str(needs_db.database_url)[:50] + "..." if hasattr(needs_db, 'database_url') else "No database_url"
+            }
+        except Exception as e:
+            return {
+                "status": "error", 
+                "message": f"Needs database test failed: {str(e)}",
+                "error_type": str(type(e).__name__),
+                "needs_db_type": str(type(needs_db))
+            }
+            
+    except Exception as e:
+        return {"status": "error", "message": f"Test failed: {str(e)}"}
 
 if __name__ == "__main__":
     import uvicorn
