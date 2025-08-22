@@ -1125,8 +1125,22 @@ async def store_personal_info_simple(user_id: str, info: dict):
             try:
                 import json
                 backup_file = f"user_profile_{user_id}.json"
+                
+                # Clean the profile data for JSON serialization
+                def clean_for_json(obj):
+                    if isinstance(obj, dict):
+                        return {k: clean_for_json(v) for k, v in obj.items()}
+                    elif isinstance(obj, list):
+                        return [clean_for_json(item) for item in obj]
+                    elif hasattr(obj, 'isoformat'):  # datetime objects
+                        return obj.isoformat()
+                    else:
+                        return obj
+                
+                clean_profile = clean_for_json(user_profiles[user_id])
+                
                 with open(backup_file, 'w') as f:
-                    json.dump(user_profiles[user_id], f, indent=2)
+                    json.dump(clean_profile, f, indent=2)
                 print(f"💾 Saved profile backup to {backup_file}")
             except Exception as e:
                 print(f"❌ File backup failed: {e}")
