@@ -166,7 +166,7 @@ async def startup_event():
         # Initialize needs database tables
         try:
             print("🔍 Initializing needs database tables...")
-            needs_initialized = await needs_db.initialize()
+            needs_initialized = await needs_db.initialize_needs_tables()
             if needs_initialized:
                 print("✅ Needs database tables initialized successfully")
             else:
@@ -3412,7 +3412,7 @@ async def force_init_needs_database():
             return {"error": "needs_db is None"}
         
         # Force create needs database tables
-        success = await needs_db.initialize()
+        success = await needs_db.initialize_needs_tables()
         
         if success:
             return {
