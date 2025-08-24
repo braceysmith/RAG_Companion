@@ -923,7 +923,7 @@ async def get_due_reminders(user_id: str) -> list:
         print(f"🔍 User {user_id} has {len(reminders)} total reminders")
         
         for reminder in reminders:
-            reminder_time = reminder["datetime"]
+            reminder_time = reminder["due_date"]
             
             # Ensure both times are timezone-aware for proper comparison
             if reminder_time.tzinfo is None:
@@ -932,10 +932,10 @@ async def get_due_reminders(user_id: str) -> list:
             
             is_due = reminder_time <= now
             time_diff = (reminder_time - now).total_seconds()
-            print(f"  📝 Reminder: '{reminder['content']}' due at {reminder_time}, triggered: {reminder['triggered']}, is_due: {is_due}")
+            print(f"  📝 Reminder: '{reminder['text']}' due at {reminder_time}, status: {reminder.get('status', 'unknown')}, is_due: {is_due}")
             print(f"    ⏱️  Time difference: {time_diff:.1f} seconds ({time_diff/60:.1f} minutes)")
             
-            if not reminder["triggered"] and is_due:
+            if not reminder.get("status") == "triggered" and is_due:
                 due_reminders.append(reminder)
                 print(f"  ✅ Found due reminder: {reminder['id']} (not yet triggered)")
         
@@ -957,14 +957,14 @@ async def get_pending_reminders(user_id: str) -> list:
         now = datetime.now(timezone.utc)
         
         for reminder in reminders:
-            reminder_time = reminder["datetime"]
+            reminder_time = reminder["due_date"]
             
             # Ensure both times are timezone-aware for proper comparison
             if reminder_time.tzinfo is None:
                 # If reminder time is naive, assume it's UTC
                 reminder_time = reminder_time.replace(tzinfo=timezone.utc)
             
-            if not reminder["triggered"] and reminder_time > now:
+            if not reminder.get("status") == "triggered" and reminder_time > now:
                 pending_reminders.append(reminder)
         
         return pending_reminders
@@ -1209,8 +1209,8 @@ async def generate_conversational_response(user_id: str, query: str, personal_in
         conversation_context = await get_conversation_context(user_id)
         
         # Check for due reminders
-        due_reminders = get_due_reminders(user_id)
-        pending_reminders = get_pending_reminders(user_id)
+        due_reminders = await get_due_reminders(user_id)
+        pending_reminders = await get_pending_reminders(user_id)
         print(f"🔍 Reminder check - due: {len(due_reminders)}, pending: {len(pending_reminders)}")
         if due_reminders:
             print(f"🔔 Due reminders: {[r['content'] for r in due_reminders]}")
@@ -1530,7 +1530,7 @@ async def rag_query_sync(request: dict):
             ai_response_text = results[0].get("text", "")
             if ai_response_text:
                 try:
-                    store_conversation_turn(user_id, query_text, ai_response_text)
+                    await store_conversation_turn(user_id, query_text, ai_response_text)
                 except Exception as store_error:
                     print(f"Warning: Could not store conversation turn: {store_error}")
         
