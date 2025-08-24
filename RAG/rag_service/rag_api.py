@@ -784,14 +784,14 @@ def parse_reminder_request(remainder: str, pattern_type: str) -> dict:
                         # Use UTC time consistently to avoid timezone issues
                         utc_now = datetime.now(timezone.utc)
                         if unit.startswith("minute"):
-                            reminder_data["datetime"] = utc_now + timedelta(minutes=amount)
-                            print(f"⏰ Reminder set for: {reminder_data['datetime']} UTC (in {amount} minutes from server time)")
+                            reminder_data["due_date"] = utc_now + timedelta(minutes=amount)
+                            print(f"⏰ Reminder set for: {reminder_data['due_date']} UTC (in {amount} minutes from server time)")
                         elif unit.startswith("hour"):
-                            reminder_data["datetime"] = utc_now + timedelta(hours=amount)
+                            reminder_data["due_date"] = utc_now + timedelta(hours=amount)
                         elif unit.startswith("day"):
-                            reminder_data["datetime"] = utc_now + timedelta(days=amount)
+                            reminder_data["due_date"] = utc_now + timedelta(days=amount)
                         elif unit.startswith("week"):
-                            reminder_data["datetime"] = utc_now + timedelta(weeks=amount)
+                            reminder_data["due_date"] = utc_now + timedelta(weeks=amount)
                     elif time_type == "relative_word":
                         # Convert word numbers to integers
                         word_to_number = {
@@ -804,43 +804,43 @@ def parse_reminder_request(remainder: str, pattern_type: str) -> dict:
                         unit = match.group(2)
                         utc_now = datetime.now(timezone.utc)
                         if unit.startswith("minute"):
-                            reminder_data["datetime"] = utc_now + timedelta(minutes=amount)
-                            print(f"⏰ Reminder set for: {reminder_data['datetime']} UTC (in {amount} minutes from server time)")
+                            reminder_data["due_date"] = utc_now + timedelta(minutes=amount)
+                            print(f"⏰ Reminder set for: {reminder_data['due_date']} UTC (in {amount} minutes from server time)")
                         elif unit.startswith("hour"):
-                            reminder_data["datetime"] = utc_now + timedelta(hours=amount)
+                            reminder_data["due_date"] = utc_now + timedelta(hours=amount)
                         elif unit.startswith("day"):
-                            reminder_data["datetime"] = utc_now + timedelta(days=amount)
+                            reminder_data["due_date"] = utc_now + timedelta(days=amount)
                         elif unit.startswith("week"):
-                            reminder_data["datetime"] = utc_now + timedelta(weeks=amount)
+                            reminder_data["due_date"] = utc_now + timedelta(weeks=amount)
                     elif time_type == "relative_single":
                         # "in a minute", "in an hour", etc.
                         unit = match.group(1)
                         utc_now = datetime.now(timezone.utc)
                         if unit.startswith("minute"):
-                            reminder_data["datetime"] = utc_now + timedelta(minutes=1)
-                            print(f"⏰ Reminder set for: {reminder_data['datetime']} UTC (in 1 minute from server time)")
+                            reminder_data["due_date"] = utc_now + timedelta(minutes=1)
+                            print(f"⏰ Reminder set for: {reminder_data['due_date']} UTC (in 1 minute from server time)")
                         elif unit.startswith("hour"):
-                            reminder_data["datetime"] = utc_now + timedelta(hours=1)
+                            reminder_data["due_date"] = utc_now + timedelta(hours=1)
                         elif unit.startswith("day"):
-                            reminder_data["datetime"] = utc_now + timedelta(days=1)
+                            reminder_data["due_date"] = utc_now + timedelta(days=1)
                         elif unit.startswith("week"):
-                            reminder_data["datetime"] = utc_now + timedelta(weeks=1)
+                            reminder_data["due_date"] = utc_now + timedelta(weeks=1)
                     elif time_type == "tomorrow":
                         time_part = match.group(1) if len(match.groups()) > 0 else "9:00 AM"
                         utc_now = datetime.now(timezone.utc)
                         tomorrow = utc_now + timedelta(days=1)
                         if date_parser:
-                            reminder_data["datetime"] = date_parser.parse(f"{tomorrow.strftime('%Y-%m-%d')} {time_part}")
+                            reminder_data["due_date"] = date_parser.parse(f"{tomorrow.strftime('%Y-%m-%d')} {time_part}")
                         else:
                             # Simple fallback parsing
-                            reminder_data["datetime"] = tomorrow.replace(hour=9, minute=0, second=0, microsecond=0)
+                            reminder_data["due_date"] = tomorrow.replace(hour=9, minute=0, second=0, microsecond=0)
                     else:
                         # Try to parse the matched time/date
                         if date_parser:
-                            reminder_data["datetime"] = date_parser.parse(match.group(0))
+                            reminder_data["due_date"] = date_parser.parse(match.group(0))
                         else:
                             # Simple fallback - default to 1 hour from now (UTC)
-                            reminder_data["datetime"] = datetime.now(timezone.utc) + timedelta(hours=1)
+                            reminder_data["due_date"] = datetime.now(timezone.utc) + timedelta(hours=1)
                     
                     time_found = True
                     # Remove the time part from the content
@@ -851,17 +851,17 @@ def parse_reminder_request(remainder: str, pattern_type: str) -> dict:
         
         # If no specific time found, set default reminder for 1 hour from now (UTC)
         if not time_found:
-            reminder_data["datetime"] = datetime.now(timezone.utc) + timedelta(hours=1)
+            reminder_data["due_date"] = datetime.now(timezone.utc) + timedelta(hours=1)
             
         # Clean up the reminder content
         remainder = remainder.strip()
         # Remove common connector words
         remainder = re.sub(r"^(that|to|about)\s+", "", remainder, flags=re.IGNORECASE)
         
-        reminder_data["content"] = remainder
+        reminder_data["text"] = remainder
         
         # Only return if we have meaningful content
-        if len(reminder_data["content"]) > 2:
+        if len(reminder_data["text"]) > 2:
             return reminder_data
             
     except Exception as e:
@@ -878,8 +878,8 @@ async def store_reminder(user_id: str, reminder_data: dict) -> str:
     
     reminder = {
         "id": reminder_id,
-        "content": reminder_data["content"],
-        "datetime": reminder_data["datetime"],
+        "text": reminder_data["text"],
+        "due_date": reminder_data["due_date"],
         "original_text": reminder_data["original_text"],
         "created_at": datetime.now(timezone.utc),
         "triggered": False,
@@ -890,19 +890,19 @@ async def store_reminder(user_id: str, reminder_data: dict) -> str:
     try:
         if needs_db:
             reminder_data = {
-                'text': reminder['content'],
+                'text': reminder['text'],
                 'type': 'general',
-                'due_date': reminder['datetime'],
+                'due_date': reminder['due_date'],
                 'priority': 'medium',
                 'needs_context': {}
             }
             success = await needs_db.store_user_reminder(user_id, reminder_data)
             if success:
-                print(f"📅 Stored reminder for {user_id} in database: '{reminder['content']}' at {reminder['datetime']}")
+                print(f"📅 Stored reminder for {user_id} in database: '{reminder['text']}' at {reminder['due_date']}")
             else:
                 print(f"❌ Failed to store reminder for {user_id} in database")
         else:
-            print(f"⚠️  Database not available, reminder not stored: '{reminder['content']}'")
+            print(f"⚠️  Database not available, reminder not stored: '{reminder['text']}'")
     except Exception as e:
         print(f"❌ Error storing reminder in database: {e}")
     
@@ -1271,7 +1271,7 @@ Key behaviors:
         if personal_info:
             if "reminder_created" in personal_info:
                 reminder = personal_info["reminder_created"]
-                system_content += f"\n\nThe user just created a reminder: '{reminder['content']}' for {reminder['datetime'].strftime('%B %d at %I:%M %p')}. Acknowledge this naturally and confirm the reminder."
+                system_content += f"\n\nThe user just created a reminder: '{reminder['text']}' for {reminder['due_date'].strftime('%B %d at %I:%M %p')}. Acknowledge this naturally and confirm the reminder."
             
             other_personal_info = {k: v for k, v in personal_info.items() if k != "reminder_created"}
             if other_personal_info:
@@ -1282,9 +1282,9 @@ Key behaviors:
             reminder = user_profile["reminder_created"]
             # Check if this reminder was created recently (within 30 seconds)
             from datetime import datetime, timedelta, timezone
-            if isinstance(reminder.get("datetime"), datetime):
+            if isinstance(reminder.get("due_date"), datetime):
                 now_utc = datetime.now(timezone.utc)
-                reminder_time = reminder["datetime"]
+                reminder_time = reminder["due_date"]
                 
                 # Ensure reminder time is timezone-aware
                 if reminder_time.tzinfo is None:
@@ -1292,13 +1292,13 @@ Key behaviors:
                 
                 time_since_creation = now_utc - reminder_time
                 if time_since_creation.total_seconds() < 30 and "reminder_request" not in personal_info:
-                    system_content += f"\n\nIMPORTANT: You just successfully created a reminder for the user: '{reminder['content']}' scheduled for {reminder['datetime'].strftime('%B %d at %I:%M %p')}. Acknowledge this and confirm that the reminder has been set."
+                    system_content += f"\n\nIMPORTANT: You just successfully created a reminder for the user: '{reminder['text']}' scheduled for {reminder['due_date'].strftime('%B %d at %I:%M %p')}. Acknowledge this and confirm that the reminder has been set."
         
         # Handle due reminders (this is the key feature!)
         if due_reminders:
             reminder_texts = []
             for reminder in due_reminders:
-                reminder_texts.append(f"'{reminder['content']}' (was set for {reminder['datetime'].strftime('%B %d at %I:%M %p')})")
+                reminder_texts.append(f"'{reminder['text']}' (was set for {reminder['due_date'].strftime('%B %d at %I:%M %p')})")
             
             system_content += f"\n\n🔔 IMPORTANT: You have {len(due_reminders)} reminder(s) to deliver RIGHT NOW as a caring friend would:\n" + "\n".join(f"- {text}" for text in reminder_texts)
             system_content += f"\n\nDeliver these reminders warmly and naturally as if you're a thoughtful friend who genuinely cares about helping them remember important things."
@@ -1388,8 +1388,8 @@ async def rag_query_sync(request: dict):
                 reminder_id = await store_reminder(user_id, reminder_data)
                 personal_info["reminder_created"] = {
                     "id": reminder_id,
-                    "content": reminder_data["content"],
-                    "datetime": reminder_data["datetime"]
+                    "text": reminder_data["text"],
+                    "due_date": reminder_data["due_date"]
                 }
                 # Remove the raw reminder_request to avoid confusion
                 del personal_info["reminder_request"]
@@ -1571,12 +1571,12 @@ async def store_memory(request: MemoryRequest):
                     reminder_id = await store_reminder(request.user_id, reminder_data)
                     personal_info["reminder_created"] = {
                         "id": reminder_id,
-                        "content": reminder_data["content"],
-                        "datetime": reminder_data["datetime"]
+                        "text": reminder_data["text"],
+                        "due_date": reminder_data["due_date"]
                     }
                     # Remove the raw reminder_request to avoid confusion
                     del personal_info["reminder_request"]
-                    print(f"✅ Created reminder {reminder_id}: {reminder_data['content']}")
+                    print(f"✅ Created reminder {reminder_id}: {reminder_data['text']}")
                 
                 await store_personal_info_simple(request.user_id, personal_info)
                 print(f"Extracted and stored personal info: {personal_info}")
@@ -1919,29 +1919,29 @@ async def check_reminders(user_id: str):
         # Format reminders for easy consumption
         due_formatted = []
         for reminder in due_reminders:
-            reminder_time = reminder["datetime"]
+            reminder_time = reminder["due_date"]
             # Ensure reminder time is timezone-aware
             if reminder_time.tzinfo is None:
                 reminder_time = reminder_time.replace(tzinfo=timezone.utc)
             
             due_formatted.append({
                 "id": reminder["id"],
-                "content": reminder["content"],
-                "datetime": reminder["datetime"].isoformat(),
+                "content": reminder["text"],
+                "datetime": reminder["due_date"].isoformat(),
                 "overdue_minutes": int((now_utc - reminder_time).total_seconds() / 60)
             })
         
         pending_formatted = []
         for reminder in pending_reminders:
-            reminder_time = reminder["datetime"]
+            reminder_time = reminder["due_date"]
             # Ensure reminder time is timezone-aware
             if reminder_time.tzinfo is None:
                 reminder_time = reminder_time.replace(tzinfo=timezone.utc)
             
             pending_formatted.append({
                 "id": reminder["id"],
-                "content": reminder["content"],
-                "datetime": reminder["datetime"].isoformat(),
+                "content": reminder["text"],
+                "datetime": reminder["due_date"].isoformat(),
                 "minutes_until": int((reminder_time - now_utc).total_seconds() / 60)
             })
         
@@ -2039,19 +2039,19 @@ async def create_test_reminder(user_id: str):
         try:
             if needs_db:
                 reminder_data = {
-                    'text': test_reminder['content'],
+                    'text': test_reminder['text'],
                     'type': 'test',
-                    'due_date': test_reminder['datetime'],
+                    'due_date': test_reminder['due_date'],
                     'priority': 'high',
                     'needs_context': {}
                 }
                 success = await needs_db.store_user_reminder(user_id, reminder_data)
                 if success:
-                    print(f"🧪 Created test reminder for {user_id} in database: {test_reminder['content']}")
+                    print(f"🧪 Created test reminder for {user_id} in database: {test_reminder['text']}")
                 else:
                     print(f"❌ Failed to create test reminder for {user_id} in database")
             else:
-                print(f"⚠️  Database not available, test reminder not stored: {test_reminder['content']}")
+                print(f"⚠️  Database not available, test reminder not stored: {test_reminder['text']}")
         except Exception as e:
             print(f"❌ Error creating test reminder in database: {e}")
         
@@ -2060,8 +2060,8 @@ async def create_test_reminder(user_id: str):
             "message": "Test reminder created and immediately due",
             "reminder": {
                 "id": test_reminder["id"],
-                "content": test_reminder["content"],
-                "datetime": test_reminder["datetime"].isoformat()
+                "content": test_reminder["text"],
+                "datetime": test_reminder["due_date"].isoformat()
             }
         }
         
@@ -2112,7 +2112,7 @@ async def deliver_due_reminders(user_id: str):
         # Create context for AI to deliver reminders
         reminder_context = "You have the following due reminders to deliver:\n"
         for i, reminder in enumerate(due_reminders, 1):
-            time_overdue = (now - reminder["datetime"]).total_seconds() / 60
+            time_overdue = (now - reminder["due_date"]).total_seconds() / 60
             if time_overdue < 5:
                 timing = "right now"
             elif time_overdue < 60:

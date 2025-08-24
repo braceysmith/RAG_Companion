@@ -376,13 +376,36 @@ public class MobileConversationCache : MonoBehaviour
                         // Convert cloud conversations to local format and store
                         foreach (var cloudConv in response.conversations)
                         {
+                            // Skip conversations with missing required fields
+                            if (string.IsNullOrEmpty(cloudConv.id) || 
+                                string.IsNullOrEmpty(cloudConv.user_message) || 
+                                string.IsNullOrEmpty(cloudConv.assistant_message))
+                            {
+                                LogMessage($"Skipping conversation with missing fields: id={cloudConv.id}, user_msg={!string.IsNullOrEmpty(cloudConv.user_message)}, assistant_msg={!string.IsNullOrEmpty(cloudConv.assistant_message)}");
+                                continue;
+                            }
+                            
+                            // Parse timestamp safely
+                            DateTime parsedTimestamp = DateTime.UtcNow; // Default to now if parsing fails
+                            if (!string.IsNullOrEmpty(cloudConv.timestamp))
+                            {
+                                try
+                                {
+                                    parsedTimestamp = DateTime.Parse(cloudConv.timestamp);
+                                }
+                                catch (Exception parseEx)
+                                {
+                                    LogMessage($"Failed to parse timestamp '{cloudConv.timestamp}', using current time: {parseEx.Message}");
+                                }
+                            }
+                            
                             var cachedConv = new CachedConversation
                             {
                                 id = cloudConv.id,
-                                userId = cloudConv.user_id,
+                                userId = cloudConv.user_id ?? userId, // Fallback to current userId if null
                                 userMessage = cloudConv.user_message,
                                 assistantMessage = cloudConv.assistant_message,
-                                timestamp = DateTime.Parse(cloudConv.timestamp),
+                                timestamp = parsedTimestamp,
                                 synced = true
                             };
                             
