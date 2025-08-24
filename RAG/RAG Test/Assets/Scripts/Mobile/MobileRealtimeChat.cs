@@ -481,7 +481,7 @@ public class MobileRealtimeChat : MonoBehaviour
     
     public void StartVoiceInput()
     {
-        LogMessage($"StartVoiceInput called - isConnectionActive: {isConnectionActive}, isTalking: {isTalking}, localMicTrack != null: {localMicTrack != null}");
+        LogMessage($"StartVoiceInput called - isConnectionActive: {isConnectionActive}, isTalking: {isTalking}, isAIResponding: {isAIResponding}, localMicTrack != null: {localMicTrack != null}");
         
         if (!isConnectionActive)
         {
@@ -493,6 +493,13 @@ public class MobileRealtimeChat : MonoBehaviour
         if (isTalking)
         {
             LogMessage("Already recording voice input");
+            return;
+        }
+        
+        if (isAIResponding)
+        {
+            LogMessage("Cannot start voice input - AI is currently responding");
+            OnError?.Invoke("Please wait for the AI to finish responding");
             return;
         }
         
@@ -580,6 +587,13 @@ public class MobileRealtimeChat : MonoBehaviour
         if (!isConnectionActive)
         {
             OnError?.Invoke("Not connected to realtime session");
+            return;
+        }
+        
+        if (isAIResponding)
+        {
+            LogMessage("Cannot send text message - AI is currently responding");
+            OnError?.Invoke("Please wait for the AI to finish responding");
             return;
         }
         
@@ -2730,6 +2744,16 @@ public class MobileRealtimeChat : MonoBehaviour
     public bool IsConnected => isConnectionActive;
     public bool IsTalking => isTalking;
     public bool IsAIResponding => isAIResponding;
+    
+    public bool CanStartNewConversation => !isAIResponding && !isTalking;
+    
+    public string GetConversationStatus()
+    {
+        if (isAIResponding) return "AI is responding";
+        if (isTalking) return "Recording voice input";
+        if (isConnectionActive) return "Ready for input";
+        return "Not connected";
+    }
     public AudioSource RemoteAudioSource => remoteAudioSource;
     
     public void SetRemoteAudioSource(AudioSource audioSource)
