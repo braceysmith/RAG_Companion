@@ -271,6 +271,7 @@ class RAGDatabase:
             # Note: register_vector is not needed for async connections
             async with conn.cursor() as cur:
                 memory_id = f"{user_id}_{memory_type}_{hash(content)}"
+                import json
                 await cur.execute("""
                     INSERT INTO user_memory (
                         memory_id, user_id, memory_type, embedding, content, metadata
@@ -287,7 +288,7 @@ class RAGDatabase:
                     "memory_type": memory_type,
                     "embedding": embedding,
                     "content": content,
-                    "metadata": metadata or {}
+                    "metadata": json.dumps(metadata or {})
                 })
                 await conn.commit()
     
@@ -421,6 +422,7 @@ class RAGDatabase:
         try:
             async with await psycopg.AsyncConnection.connect(self.db_url) as conn:
                 async with conn.cursor() as cur:
+                    import json
                     await cur.execute("""
                         INSERT INTO multimedia_content (
                             content_id, user_id, session_id, turn_id, content_type,
@@ -442,11 +444,11 @@ class RAGDatabase:
                         "file_size": file_size,
                         "mime_type": mime_type,
                         "content_hash": content_hash,
-                        "metadata": metadata or {},
+                        "metadata": json.dumps(metadata or {}),
                         "is_generated": is_generated,
                         "generation_tool": generation_tool,
                         "generation_prompt": generation_prompt,
-                        "tags": tags or []
+                        "tags": json.dumps(tags or [])
                     })
                     await conn.commit()
                     print(f"✅ Stored multimedia content: {content_id}")
@@ -548,12 +550,13 @@ class RAGDatabase:
         try:
             async with await psycopg.AsyncConnection.connect(self.db_url) as conn:
                 async with conn.cursor() as cur:
+                    import json
                     await cur.execute("""
                         INSERT INTO conversation_content (
                             content_id, turn_id, user_id, content_type, content_data,
                             multimedia_id, content_order, is_user_content, mcp_tool_used,
                             tool_parameters, metadata
-                        ) VALUES (
+                        )                         VALUES (
                             %(content_id)s, %(turn_id)s, %(user_id)s, %(content_type)s, %(content_data)s,
                             %(multimedia_id)s, %(content_order)s, %(is_user_content)s, %(mcp_tool_used)s,
                             %(tool_parameters)s, %(metadata)s
@@ -568,8 +571,8 @@ class RAGDatabase:
                         "content_order": content_order,
                         "is_user_content": is_user_content,
                         "mcp_tool_used": mcp_tool_used,
-                        "tool_parameters": tool_parameters or {},
-                        "metadata": metadata or {}
+                        "tool_parameters": json.dumps(tool_parameters or {}),
+                        "metadata": json.dumps(metadata or {})
                     })
                     await conn.commit()
                     return True
@@ -621,6 +624,7 @@ class RAGDatabase:
         try:
             async with await psycopg.AsyncConnection.connect(self.db_url) as conn:
                 async with conn.cursor() as cur:
+                    import json
                     await cur.execute("""
                         INSERT INTO mcp_tool_executions (
                             execution_id, user_id, session_id, turn_id, tool_name,
@@ -637,12 +641,12 @@ class RAGDatabase:
                         "session_id": session_id,
                         "turn_id": turn_id,
                         "tool_name": tool_name,
-                        "tool_parameters": tool_parameters or {},
-                        "execution_result": execution_result or {},
+                        "tool_parameters": json.dumps(tool_parameters or {}),
+                        "execution_result": json.dumps(execution_result or {}),
                         "execution_time_ms": execution_time_ms,
                         "success": success,
                         "error_message": error_message,
-                        "metadata": metadata or {}
+                        "metadata": json.dumps(metadata or {})
                     })
                     await conn.commit()
                     return True

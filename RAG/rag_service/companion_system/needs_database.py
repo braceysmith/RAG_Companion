@@ -249,10 +249,10 @@ class NeedsDatabase:
                             "id": row[0],
                             "text": row[1],
                             "type": row[2],
-                            "due_date": row[3].isoformat() if row[3] else None,
+                            "due_date": row[3],  # Keep as datetime object
                             "priority": row[4],
                             "needs_context": json.loads(row[5]) if row[5] else {},
-                            "created_at": row[6].isoformat() if row[6] else None
+                            "created_at": row[6]  # Keep as datetime object
                         })
                     
                     return reminders
