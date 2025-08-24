@@ -2792,9 +2792,20 @@ public class MobileRealtimeChat : MonoBehaviour
             return;
         }
         
+        // Check if we're currently loading conversation history to prevent duplicates
+        var companionUI = FindObjectOfType<MobileCompanionUI>();
+        if (companionUI != null && companionUI.IsLoadingHistory)
+        {
+            LogMessage("Skipping chat post creation - currently loading conversation history");
+            return;
+        }
+        
         LogMessage($"🔍 Creating chat post: type={postType}, text='{text}', isHuman={isHuman}, image={(image != null ? $"valid ({image.width}x{image.height})" : "null")}");
         
-        GameObject postObj = Instantiate(chatPostPrefab, coachChatRoot);
+        // Try to use shared chat container for consistency
+        Transform targetContainer = GetSharedChatContainer();
+        
+        GameObject postObj = Instantiate(chatPostPrefab, targetContainer);
         ChatPostPrefab postComponent = postObj.GetComponent<ChatPostPrefab>();
         
         if (postComponent != null)
@@ -2826,6 +2837,25 @@ public class MobileRealtimeChat : MonoBehaviour
         
         // Scroll to bottom
         ScrollToBottom();
+    }
+    
+    // Get shared chat container for consistency with MobileCompanionUI
+    private Transform GetSharedChatContainer()
+    {
+        // Try to get the shared container from MobileCompanionUI
+        var companionUI = FindObjectOfType<MobileCompanionUI>();
+        if (companionUI != null)
+        {
+            var sharedContainer = companionUI.GetSharedChatContainer();
+            if (sharedContainer != null && sharedContainer != coachChatRoot)
+            {
+                LogMessage("Using shared chat container from MobileCompanionUI");
+                return sharedContainer;
+            }
+        }
+        
+        // Fallback to our own container
+        return coachChatRoot;
     }
     
     private void ScrollToBottom()
@@ -2943,5 +2973,19 @@ public class MobileRealtimeChat : MonoBehaviour
     {
         [JsonProperty("value")]
         public string value;
+    }
+    
+    // Clear chat container - can be called by MobileCompanionUI for synchronization
+    public void ClearChatContainer()
+    {
+        if (coachChatRoot != null)
+        {
+            int childCount = coachChatRoot.childCount;
+            for (int i = childCount - 1; i >= 0; i--)
+            {
+                DestroyImmediate(coachChatRoot.GetChild(i).gameObject);
+            }
+            LogMessage("Realtime chat container cleared");
+        }
     }
 }

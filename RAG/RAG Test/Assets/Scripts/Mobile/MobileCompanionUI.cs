@@ -17,12 +17,14 @@ public class MobileCompanionUI : MonoBehaviour
     [SerializeField] private Button cameraButton;
     [SerializeField] private ScrollRect chatScrollRect;
     [SerializeField] private GameObject messagePrefab;
+    [SerializeField] private GameObject chatPostPrefab;  // Add this field for consistency with realtime chat
     
     [Header("Mobile UI Settings")]
     [SerializeField] private bool enableSwipeGestures = true;
     [SerializeField] private bool enableVoiceInput = true;
     [SerializeField] private bool enableHapticFeedback = true;
     [SerializeField] private float messageAnimationDuration = 0.3f;
+    [SerializeField] private int maxVisibleMessages = 50;
     
     [Header("Voice Control UI")]
     [SerializeField] private Button voiceRecordButton;
@@ -66,8 +68,6 @@ public class MobileCompanionUI : MonoBehaviour
     
     // Message management
     private List<GameObject> messageObjects = new List<GameObject>();
-    private int maxVisibleMessages = 50;
-    private bool isTyping = false;
     
     // Voice state management
     private ConversationState currentState = ConversationState.Idle;
@@ -90,6 +90,9 @@ public class MobileCompanionUI : MonoBehaviour
     private Color defaultButtonColor;
     private Color recordingButtonColor = Color.red;
     private Color processingButtonColor = Color.yellow;
+    
+    // Flag to track when we're loading conversation history
+    private bool isLoadingHistory = false;
     
     public enum ConversationState
     {
@@ -2110,6 +2113,9 @@ public class MobileCompanionUI : MonoBehaviour
         {
             LogMessage($"Populating chat with {conversations.Count} loaded conversations");
             
+            // Set flag to prevent duplicate messages during history loading
+            isLoadingHistory = true;
+            
             // Clear existing messages first
             ClearChatMessages();
             
@@ -2132,11 +2138,11 @@ public class MobileCompanionUI : MonoBehaviour
             
             foreach (var conv in sortedConversations)
             {
-                // Add user message
-                AddMessage(conv.user_message, "user", false);
+                // Add user message using ChatPostPrefab for consistency
+                CreateChatPostForHistory(conv.user_message, true);
                 
-                // Add assistant response
-                AddMessage(conv.assistant_message, "assistant", false);
+                // Add assistant response using ChatPostPrefab for consistency
+                CreateChatPostForHistory(conv.assistant_message, false);
             }
             
             LogMessage($"Chat populated with {conversations.Count} conversations");
@@ -2145,13 +2151,86 @@ public class MobileCompanionUI : MonoBehaviour
         {
             LogError($"Error populating chat with history: {ex.Message}");
         }
+        finally
+        {
+            // Clear the flag after history loading is complete
+            isLoadingHistory = false;
+        }
+    }
+    
+    // Create chat posts for history using the same system as realtime chat
+    private void CreateChatPostForHistory(string text, bool isHuman)
+    {
+        if (chatPostPrefab == null)
+        {
+            LogWarning("ChatPostPrefab not assigned, falling back to AddMessage");
+            AddMessage(text, isHuman ? "user" : "assistant", false);
+            return;
+        }
+        
+        try
+        {
+            // Use the same container as realtime chat if available
+            Transform targetContainer = GetSharedChatContainer();
+            
+            GameObject postObj = Instantiate(chatPostPrefab, targetContainer);
+            ChatPostPrefab postComponent = postObj.GetComponent<ChatPostPrefab>();
+            
+            if (postComponent != null)
+            {
+                // Initialize the post with the same styling as realtime chat
+                postComponent.Initialize(ChatPostPrefab.ChatPostType.text, text, isHuman);
+                
+                // Add to our message tracking
+                messageObjects.Add(postObj);
+                
+                LogMessage($"History chat post created: {(isHuman ? "User" : "AI")} - {text.Substring(0, Math.Min(50, text.Length))}...");
+            }
+            else
+            {
+                LogError("Failed to get ChatPostPrefab component from instantiated object");
+                Destroy(postObj);
+            }
+        }
+        catch (Exception ex)
+        {
+            LogError($"Failed to create history chat post: {ex.Message}");
+            // Fallback to AddMessage
+            AddMessage(text, isHuman ? "user" : "assistant", false);
+        }
+    }
+    
+    // Get the shared chat container to unify the display
+    public Transform GetSharedChatContainer()
+    {
+        // Try to find the realtime chat system and use its container
+        var realtimeChat = FindObjectOfType<MobileRealtimeChat>();
+        if (realtimeChat != null)
+        {
+            // Use reflection to access the private field
+            var field = typeof(MobileRealtimeChat).GetField("coachChatRoot", 
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            if (field != null)
+            {
+                var container = field.GetValue(realtimeChat) as Transform;
+                if (container != null)
+                {
+                    LogMessage("Using shared chat container from MobileRealtimeChat");
+                    return container;
+                }
+            }
+        }
+        
+        // Fallback to our own container
+        LogMessage("Using local chat container as fallback");
+        return chatContainer;
     }
     
     private void ClearChatMessages()
     {
         try
         {
-            // Clear the chat display
+            // Clear the local chat display
             if (chatContainer != null)
             {
                 // Remove all child objects except the first few (keep some structure)
@@ -2162,7 +2241,14 @@ public class MobileCompanionUI : MonoBehaviour
                 }
             }
             
-            LogMessage("Chat messages cleared");
+            // Also clear the shared chat container from MobileRealtimeChat
+            var realtimeChat = FindObjectOfType<MobileRealtimeChat>();
+            if (realtimeChat != null)
+            {
+                realtimeChat.ClearChatContainer();
+            }
+            
+            LogMessage("Chat messages cleared from all containers");
         }
         catch (Exception ex)
         {
@@ -2401,4 +2487,7 @@ public class MobileCompanionUI : MonoBehaviour
     public bool IsConversationActive => currentState != ConversationState.Idle;
     
     public bool CanStartNewConversation => currentState == ConversationState.Idle;
+    
+    // Check if we're currently loading conversation history
+    public bool IsLoadingHistory => isLoadingHistory;
 }
