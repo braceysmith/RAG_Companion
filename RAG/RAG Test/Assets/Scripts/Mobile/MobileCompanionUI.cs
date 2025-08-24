@@ -25,6 +25,7 @@ public class MobileCompanionUI : MonoBehaviour
     [SerializeField] private bool enableHapticFeedback = true;
     [SerializeField] private float messageAnimationDuration = 0.3f;
     [SerializeField] private int maxVisibleMessages = 50;
+    [SerializeField] private bool debugMode = true;  // Add debug mode toggle
     
     [Header("Voice Control UI")]
     [SerializeField] private Button voiceRecordButton;
@@ -68,6 +69,7 @@ public class MobileCompanionUI : MonoBehaviour
     
     // Message management
     private List<GameObject> messageObjects = new List<GameObject>();
+    private bool isTyping = false;
     
     // Voice state management
     private ConversationState currentState = ConversationState.Idle;
@@ -805,12 +807,26 @@ public class MobileCompanionUI : MonoBehaviour
     
     private void LogMessage(string message)
     {
-        Debug.Log($"[MobileCompanionUI] {message}");
+        if (debugMode)
+        {
+            Debug.Log($"[MobileCompanionUI] {message}");
+        }
+    }
+    
+    private void LogWarning(string message)
+    {
+        if (debugMode)
+        {
+            Debug.LogWarning($"[MobileCompanionUI] {message}");
+        }
     }
     
     private void LogError(string message)
     {
-        Debug.LogError($"[MobileCompanionUI] {message}");
+        if (debugMode)
+        {
+            Debug.LogError($"[MobileCompanionUI] {message}");
+        }
     }
     
     private void OnDestroy()
