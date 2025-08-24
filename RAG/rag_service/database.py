@@ -336,13 +336,14 @@ class RAGDatabase:
         """Log a conversation turn"""
         async with await psycopg.AsyncConnection.connect(self.db_url) as conn:
             async with conn.cursor() as cur:
+                import json
                 await cur.execute("""
                     INSERT INTO conversation_turns (
                         turn_id, session_id, user_id, turn_index, user_message, 
                         assistant_response, retrieved_chunks, metadata
                     ) VALUES (
                         %(turn_id)s, %(session_id)s, %(user_id)s, %(turn_index)s, 
-                        %(user_message)s, %(assistant_response)s, %(retrieved_chunks)s, %(metadata)s
+                        %(user_message)s, %(assistant_response)s, %(metadata)s, %(retrieved_chunks)s
                     )
                 """, {
                     "turn_id": turn_id,
@@ -351,8 +352,8 @@ class RAGDatabase:
                     "turn_index": turn_index,
                     "user_message": user_message,
                     "assistant_response": assistant_response,
-                    "retrieved_chunks": retrieved_chunks,
-                    "metadata": metadata or {}
+                    "retrieved_chunks": json.dumps(retrieved_chunks or []),
+                    "metadata": json.dumps(metadata or {})
                 })
                 await conn.commit()
     
@@ -1073,6 +1074,7 @@ class RAGDatabase:
         try:
             async with await psycopg.AsyncConnection.connect(self.db_url) as conn:
                 async with conn.cursor() as cur:
+                    import json
                     await cur.execute("""
                         INSERT INTO conversation_sessions (
                             session_id, user_id, started_at, metadata
@@ -1082,7 +1084,7 @@ class RAGDatabase:
                     """, {
                         "session_id": session_id,
                         "user_id": user_id,
-                        "metadata": metadata or {}
+                        "metadata": json.dumps(metadata or {})
                     })
                     await conn.commit()
                     print(f"✅ Stored conversation session: {session_id}")
@@ -1104,8 +1106,9 @@ class RAGDatabase:
                         params["ended_at"] = ended_at
                     
                     if metadata is not None:
+                        import json
                         update_fields.append("metadata = %(metadata)s")
-                        params["metadata"] = metadata
+                        params["metadata"] = json.dumps(metadata)
                     
                     if update_fields:
                         query = f"""
