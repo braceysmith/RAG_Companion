@@ -917,6 +917,14 @@ public class MobileCompanionUI : MonoBehaviour
         LogMessage("StartVoiceRecording called");
         
         // Prefer WebRTC realtime chat for voice input
+        // Check if a conversation is already in progress
+        if (IsConversationActive)
+        {
+            LogMessage($"Cannot start voice input - conversation already active in state: {currentState}");
+            ShowError("Please wait for the current conversation to finish");
+            return;
+        }
+        
         if (realtimeChat != null && realtimeChat.IsConnected)
         {
             LogMessage("Realtime chat connected - starting voice input immediately");
@@ -2072,6 +2080,15 @@ public class MobileCompanionUI : MonoBehaviour
         LogMessage("Waiting for session configuration to complete...");
         yield return new WaitForSeconds(0.5f); // Wait 500ms for session config
         
+        // Check if a conversation is already in progress
+        if (IsConversationActive)
+        {
+            LogMessage($"Cannot start voice input after delay - conversation already active in state: {currentState}");
+            ShowError("Please wait for the current conversation to finish");
+            SetState(ConversationState.Idle);
+            yield break;
+        }
+        
         if (realtimeChat != null && realtimeChat.IsConnected)
         {
             LogMessage("Starting voice input after connection delay");
@@ -2097,7 +2114,21 @@ public class MobileCompanionUI : MonoBehaviour
             ClearChatMessages();
             
             // Add conversations in chronological order (oldest first)
-            var sortedConversations = conversations.OrderBy(c => DateTime.Parse(c.timestamp)).ToList();
+            var sortedConversations = conversations
+                .Where(c => !string.IsNullOrEmpty(c.timestamp) && 
+                           !string.IsNullOrEmpty(c.user_message) && 
+                           !string.IsNullOrEmpty(c.assistant_message))
+                .OrderBy(c => {
+                    try
+                    {
+                        return DateTime.Parse(c.timestamp);
+                    }
+                    catch
+                    {
+                        return DateTime.MinValue; // Fallback for invalid dates
+                    }
+                })
+                .ToList();
             
             foreach (var conv in sortedConversations)
             {
@@ -2366,4 +2397,8 @@ public class MobileCompanionUI : MonoBehaviour
     public bool IsProcessing => isProcessing;
     public bool IsPlayingAudio => isPlayingAudio;
     public ConversationState CurrentState => currentState;
+    
+    public bool IsConversationActive => currentState != ConversationState.Idle;
+    
+    public bool CanStartNewConversation => currentState == ConversationState.Idle;
 }
