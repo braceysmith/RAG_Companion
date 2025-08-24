@@ -1213,9 +1213,9 @@ async def generate_conversational_response(user_id: str, query: str, personal_in
         pending_reminders = await get_pending_reminders(user_id)
         print(f"🔍 Reminder check - due: {len(due_reminders)}, pending: {len(pending_reminders)}")
         if due_reminders:
-            print(f"🔔 Due reminders: {[r['content'] for r in due_reminders]}")
+            print(f"🔔 Due reminders: {[r['text'] for r in due_reminders]}")
         if pending_reminders:
-            print(f"⏰ Pending reminders: {[r['content'] for r in pending_reminders]}")
+            print(f"⏰ Pending reminders: {[r['text'] for r in pending_reminders]}")
         
         # Debug: Log what we're retrieving
         print(f"🔍 Generating response for user_id: '{user_id}'")
