@@ -102,7 +102,7 @@ public class MobileRealtimeChat : MonoBehaviour
     // Startup protection to prevent initial conversation conflicts
     private bool isInitializing = true;
     private float startupCompleteTime = 0f;
-    private const float STARTUP_PROTECTION_SECONDS = 5f; // Wait 5 seconds after startup before allowing new conversations
+    private const float STARTUP_PROTECTION_SECONDS = 15f; // Increased from 5 to 15 seconds to allow for network operations
     
     // Startup timeout protection
     private Coroutine startupTimeoutCoroutine;
@@ -492,7 +492,9 @@ public class MobileRealtimeChat : MonoBehaviour
             // Generate appropriate greeting based on whether we know the name
             string greetingMessage = GenerateGreetingMessage(userName);
             
-            LogMessage($"📢 Delivering greeting: {greetingMessage}");
+            LogMessage($"📢 Delivering greeting: '{greetingMessage}'");
+            LogMessage($"📏 Greeting message length: {greetingMessage.Length} characters");
+            LogMessage($"🔤 Greeting message words: {greetingMessage.Split(' ').Length} words");
             
             // Deliver greeting directly through voice system (bypassing full AI conversation)
             TriggerDirectAIMessage(greetingMessage);
@@ -2881,9 +2883,12 @@ public class MobileRealtimeChat : MonoBehaviour
                 type = "conversation.item.create",
                 item = new
                 {
-                    type = "text",
-                    text = aiMessage,
-                    role = "assistant"
+                    type = "message",
+                    role = "assistant",
+                    content = new[]
+                    {
+                        new { type = "text", text = aiMessage }
+                    }
                 }
             };
             
@@ -3230,15 +3235,30 @@ public class MobileRealtimeChat : MonoBehaviour
         {
             LogWarning("⚠️ Startup protection timeout reached - automatically disabling protection");
             MarkStartupComplete();
+            
+            // If greeting hasn't been triggered yet, trigger it now
+            if (!greetingTriggered)
+            {
+                LogMessage("🚀 Startup timeout reached - triggering greeting sequence now");
+                greetingTriggered = true;
+                StartCoroutine(DelayedAutoGreetingWithStartupProtection());
+            }
         }
     }
     
     // Trigger greeting when system is ready (called after initial sync)
     public void TriggerGreetingWhenReady()
     {
+        if (greetingTriggered)
+        {
+            LogMessage("⚠️ Greeting already triggered, skipping duplicate");
+            return;
+        }
+        
         if (IsReadyForGreeting())
         {
             LogMessage("🚀 System ready - triggering greeting sequence");
+            greetingTriggered = true;
             StartCoroutine(DelayedAutoGreetingWithStartupProtection());
         }
         else
@@ -3259,6 +3279,10 @@ public class MobileRealtimeChat : MonoBehaviour
         }
         
         LogMessage("✅ System now ready - proceeding with greeting");
+        greetingTriggered = true;
         StartCoroutine(DelayedAutoGreetingWithStartupProtection());
     }
+    
+    // Track if greeting has been triggered to prevent duplicates
+    private bool greetingTriggered = false;
 }
