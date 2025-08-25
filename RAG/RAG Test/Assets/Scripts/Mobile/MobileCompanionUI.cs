@@ -2223,23 +2223,72 @@ public class MobileCompanionUI : MonoBehaviour
         var realtimeChat = FindObjectOfType<MobileRealtimeChat>();
         if (realtimeChat != null)
         {
-            // Use reflection to access the private field
-            var field = typeof(MobileRealtimeChat).GetField("coachChatRoot", 
-                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            if (field != null)
+            // Use reflection to get the coachChatRoot from MobileRealtimeChat
+            var realtimeChatType = realtimeChat.GetType();
+            var coachChatRootField = realtimeChatType.GetField("coachChatRoot", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            
+            if (coachChatRootField != null)
             {
-                var container = field.GetValue(realtimeChat) as Transform;
-                if (container != null)
+                Transform coachChatRoot = coachChatRootField.GetValue(realtimeChat) as Transform;
+                if (coachChatRoot != null)
                 {
-                    LogMessage("Using shared chat container from MobileRealtimeChat");
-                    return container;
+                    LogMessage("✅ Using shared chat container from MobileRealtimeChat");
+                    return coachChatRoot;
                 }
             }
         }
         
-        // Fallback to our own container
-        LogMessage("Using local chat container as fallback");
+        // Fallback to our own chat container
+        LogMessage("⚠️ Using fallback chat container");
         return chatContainer;
+    }
+    
+    // Check if ChatPostPrefab is available
+    public bool HasChatPostPrefab()
+    {
+        return chatPostPrefab != null;
+    }
+    
+    // Create a chat post for a new message (not from history)
+    public void CreateChatPostForMessage(string text, bool isHuman)
+    {
+        if (chatPostPrefab == null)
+        {
+            LogWarning("ChatPostPrefab not assigned, falling back to AddMessage");
+            AddMessage(text, isHuman ? "user" : "assistant", true);
+            return;
+        }
+        
+        try
+        {
+            // Use the same container as realtime chat if available
+            Transform targetContainer = GetSharedChatContainer();
+            
+            GameObject postObj = Instantiate(chatPostPrefab, targetContainer);
+            ChatPostPrefab postComponent = postObj.GetComponent<ChatPostPrefab>();
+            
+            if (postComponent != null)
+            {
+                // Initialize the post with the same styling as realtime chat
+                postComponent.Initialize(ChatPostPrefab.ChatPostType.text, text, isHuman);
+                
+                // Add to our message tracking
+                messageObjects.Add(postObj);
+                
+                LogMessage($"New chat post created: {(isHuman ? "User" : "AI")} - {text.Substring(0, Math.Min(50, text.Length))}...");
+            }
+            else
+            {
+                LogError("Failed to get ChatPostPrefab component from instantiated object");
+                Destroy(postObj);
+            }
+        }
+        catch (Exception ex)
+        {
+            LogError($"Failed to create new chat post: {ex.Message}");
+            // Fallback to AddMessage
+            AddMessage(text, isHuman ? "user" : "assistant", true);
+        }
     }
     
     private void ClearChatMessages()

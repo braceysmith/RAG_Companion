@@ -286,6 +286,18 @@ public class MobileRAGCompanionSystem : MonoBehaviour
             }
             
             LogMessage($"Initial sync completed: {unsyncedConversations.Count} conversations synced");
+            
+            // Mark startup as complete in realtime chat system
+            var realtimeChat = FindObjectOfType<MobileRealtimeChat>();
+            if (realtimeChat != null)
+            {
+                realtimeChat.MarkStartupComplete();
+                LogMessage("✅ Startup protection disabled - system ready for conversations");
+                
+                // Trigger greeting sequence after startup and history loading is complete
+                LogMessage("🚀 Triggering greeting sequence after successful initialization");
+                realtimeChat.TriggerGreetingWhenReady();
+            }
         }
         catch (Exception ex)
         {

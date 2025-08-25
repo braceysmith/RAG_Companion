@@ -89,6 +89,101 @@ public class MobileRealtimeChat : MonoBehaviour
 
     [Header("Animation")]
     public UI_no_weapon animationController; // Reference to character animation controller
+    
+    // Flag to track when we're loading conversation history
+    private bool isLoadingHistory = false;
+    
+    // Enhanced conversation state tracking
+    private string currentOpenAIResponseId = null;
+    private bool isWaitingForOpenAIResponse = false;
+    private float lastResponseStartTime = 0f;
+    private const float RESPONSE_TIMEOUT_SECONDS = 30f; // Timeout for OpenAI responses
+    
+    // Startup protection to prevent initial conversation conflicts
+    private bool isInitializing = true;
+    private float startupCompleteTime = 0f;
+    private const float STARTUP_PROTECTION_SECONDS = 5f; // Wait 5 seconds after startup before allowing new conversations
+    
+    // Startup timeout protection
+    private Coroutine startupTimeoutCoroutine;
+    
+    // Conversation state validation
+    public bool CanStartNewConversation => !isAIResponding && !isTalking && !isWaitingForOpenAIResponse && !isInitializing;
+    
+    public string GetConversationStatus()
+    {
+        if (isInitializing) return "Initializing - please wait";
+        if (isAIResponding) return "AI is responding";
+        if (isTalking) return "Recording voice input";
+        if (isWaitingForOpenAIResponse) return "Waiting for OpenAI response";
+        if (isConnectionActive) return "Ready for input";
+        return "Not connected";
+    }
+    
+    // Check if we can start a new conversation and provide detailed status
+    public (bool canStart, string reason) CanStartNewConversationWithReason()
+    {
+        if (isInitializing)
+            return (false, "System is still initializing - please wait");
+        
+        if (!isConnectionActive)
+            return (false, "Not connected to realtime session");
+        
+        if (isTalking)
+            return (false, "Already recording voice input");
+        
+        if (isAIResponding)
+            return (false, "AI is currently responding");
+        
+        if (isWaitingForOpenAIResponse)
+            return (false, "Waiting for OpenAI response to complete");
+        
+        return (true, "Ready for new conversation");
+    }
+    
+    // Check if it's safe to proceed with greeting (after startup and history loading)
+    public bool IsReadyForGreeting()
+    {
+        if (isInitializing)
+            return false;
+            
+        var companionUI = FindObjectOfType<MobileCompanionUI>();
+        if (companionUI != null && companionUI.IsLoadingHistory)
+            return false;
+            
+        return isConnectionActive;
+    }
+    
+    // Force reset conversation state for emergency recovery
+    public void ForceResetConversationState()
+    {
+        LogWarning("🔄 Force resetting conversation state for emergency recovery");
+        
+        // Reset all conversation flags
+        isAIResponding = false;
+        isTalking = false;
+        CancelOpenAIResponse();
+        
+        // Stop any ongoing coroutines
+        if (audioStreamingCoroutine != null)
+        {
+            StopCoroutine(audioStreamingCoroutine);
+            audioStreamingCoroutine = null;
+        }
+        
+        // Reset UI state
+        if (companionUI != null)
+        {
+            companionUI.ShowProcessingIndicator(false);
+            companionUI.ShowAudioPlaybackIndicator(false);
+            companionUI.ShowRecordingIndicator(false);
+            companionUI.ResetToIdleState();
+            companionUI.UpdateStatusText("Ready - Tap to talk");
+        }
+        
+        LogMessage("✅ Conversation state force reset complete");
+    }
+    
     private void Start()
     {
         // Initialize Unity audio settings for better WebRTC compatibility
@@ -98,6 +193,9 @@ public class MobileRealtimeChat : MonoBehaviour
         AudioSettings.Reset(audioConfig);
         
         InitializeMobileRealtime();
+        
+        // Start startup timeout protection
+        startupTimeoutCoroutine = StartCoroutine(StartupTimeoutProtection());
         
         // Auto-connect to WebRTC if enabled
         if (autoConnectOnStart)
@@ -354,6 +452,53 @@ public class MobileRealtimeChat : MonoBehaviour
         }));
     }
     
+    private IEnumerator DelayedAutoGreetingWithStartupProtection()
+    {
+        LogMessage("🔄 Waiting for startup protection to expire before greeting...");
+        
+        // Wait for startup protection to expire
+        while (isInitializing)
+        {
+            yield return new WaitForSeconds(0.5f); // Check every 500ms
+        }
+        
+        LogMessage($"✅ Startup protection expired, now waiting for conversation history to load...");
+        
+        // Wait for conversation history to be loaded
+        var companionUI = FindObjectOfType<MobileCompanionUI>();
+        if (companionUI != null)
+        {
+            while (companionUI.IsLoadingHistory)
+            {
+                LogMessage("⏳ Waiting for conversation history to finish loading...");
+                yield return new WaitForSeconds(0.5f); // Check every 500ms
+            }
+            LogMessage("✅ Conversation history loaded, proceeding with greeting...");
+        }
+        
+        LogMessage($"⏳ Now waiting {greetingDelay} seconds before greeting...");
+        yield return new WaitForSeconds(greetingDelay);
+        
+        if (!isConnectionActive)
+        {
+            LogMessage("⚠️ Connection lost before greeting could be delivered");
+            yield break;
+        }
+        
+        LogMessage("🤝 Generating personalized greeting...");
+        
+        // Get user's name from RAG system using coroutine
+        yield return StartCoroutine(GetUserNameCoroutine((userName) => {
+            // Generate appropriate greeting based on whether we know the name
+            string greetingMessage = GenerateGreetingMessage(userName);
+            
+            LogMessage($"📢 Delivering greeting: {greetingMessage}");
+            
+            // Deliver greeting directly through voice system (bypassing full AI conversation)
+            TriggerDirectAIMessage(greetingMessage);
+        }));
+    }
+    
     private IEnumerator GetUserNameCoroutine(System.Action<string> callback)
     {
         string userName = "";
@@ -481,7 +626,14 @@ public class MobileRealtimeChat : MonoBehaviour
     
     public void StartVoiceInput()
     {
-        LogMessage($"StartVoiceInput called - isConnectionActive: {isConnectionActive}, isTalking: {isTalking}, isAIResponding: {isAIResponding}, localMicTrack != null: {localMicTrack != null}");
+        LogMessage($"StartVoiceInput called - isConnectionActive: {isConnectionActive}, isTalking: {isTalking}, isAIResponding: {isAIResponding}, isWaitingForOpenAIResponse: {isWaitingForOpenAIResponse}, isInitializing: {isInitializing}, localMicTrack != null: {localMicTrack != null}");
+        
+        if (isInitializing)
+        {
+            LogMessage("Cannot start voice input - system is still initializing");
+            OnError?.Invoke("Please wait for the system to finish initializing");
+            return;
+        }
         
         if (!isConnectionActive)
         {
@@ -496,9 +648,9 @@ public class MobileRealtimeChat : MonoBehaviour
             return;
         }
         
-        if (isAIResponding)
+        if (isAIResponding || isWaitingForOpenAIResponse)
         {
-            LogMessage("Cannot start voice input - AI is currently responding");
+            LogMessage("Cannot start voice input - AI is currently responding or waiting for response");
             OnError?.Invoke("Please wait for the AI to finish responding");
             return;
         }
@@ -584,15 +736,22 @@ public class MobileRealtimeChat : MonoBehaviour
     
     public void SendTextMessage(string message)
     {
+        if (isInitializing)
+        {
+            LogMessage("Cannot send text message - system is still initializing");
+            OnError?.Invoke("Please wait for the system to finish initializing");
+            return;
+        }
+        
         if (!isConnectionActive)
         {
             OnError?.Invoke("Not connected to realtime session");
             return;
         }
         
-        if (isAIResponding)
+        if (isAIResponding || isWaitingForOpenAIResponse)
         {
-            LogMessage("Cannot send text message - AI is currently responding");
+            LogMessage("Cannot send text message - AI is currently responding or waiting for response");
             OnError?.Invoke("Please wait for the AI to finish responding");
             return;
         }
@@ -618,6 +777,7 @@ public class MobileRealtimeChat : MonoBehaviour
                 LogMessage("Sending response cancel to OpenAI");
                 SendResponseCancel();
                 isAIResponding = false;
+                CancelOpenAIResponse(); // Mark OpenAI response as cancelled
                 LogMessage("AI response canceled successfully");
             }
             else
@@ -837,8 +997,9 @@ public class MobileRealtimeChat : MonoBehaviour
             // Trigger auto-greeting if enabled
             if (enableAutoGreeting)
             {
-                LogMessage("🤝 Auto-greeting enabled - will greet user in a moment");
-                StartCoroutine(DelayedAutoGreeting());
+                LogMessage("🤝 Auto-greeting enabled - will be triggered after initialization sequence completes");
+                // Note: Auto-greeting is now controlled by MobileRAGCompanionSystem after initial sync
+                // StartCoroutine(DelayedAutoGreetingWithStartupProtection());
             }
             // Notify connection established
             OnConnectionEstablished?.Invoke();
@@ -1173,12 +1334,16 @@ public class MobileRealtimeChat : MonoBehaviour
     private void HandleResponseStart()
     {
         isAIResponding = true;
+        
+        // Extract response ID if available to track this specific response
+        var responseId = "resp_" + System.Guid.NewGuid().ToString("N").Substring(0, 8);
+        StartOpenAIResponse(responseId);
 
         //ai is talking
         if (animationController != null)
             animationController.TalkFriendlyOnClick();
 
-        LogMessage("AI response started - transitioning to Responding state");
+        LogMessage($"AI response started - transitioning to Responding state (ID: {responseId})");
         
         // Update UI to Responding state initially (shows INTERRUPT button)
         if (companionUI != null)
@@ -1194,6 +1359,7 @@ public class MobileRealtimeChat : MonoBehaviour
         LogMessage($"🎵 Previous isAIResponding state: {isAIResponding}");
         
         isAIResponding = false;
+        CompleteOpenAIResponse(); // Mark OpenAI response as complete
         LogMessage("✅ AI response COMPLETELY finished - resetting to idle state");
         
         // NOW it's safe to reset UI state - the entire response is done
@@ -1280,10 +1446,33 @@ public class MobileRealtimeChat : MonoBehaviour
             return;
         }
         
+        // Handle conversation_already_has_active_response error specifically
+        if (errorCode == "conversation_already_has_active_response")
+        {
+            LogWarning($"⚠️ OpenAI conversation conflict detected: {errorMessage}");
+            LogMessage("Resetting OpenAI response state to resolve conflict");
+            
+            // Force reset the OpenAI response state
+            CancelOpenAIResponse();
+            isAIResponding = false;
+            
+            // Reset UI state
+            if (companionUI != null)
+            {
+                companionUI.ShowProcessingIndicator(false);
+                companionUI.ShowAudioPlaybackIndicator(false);
+                companionUI.ResetToIdleState();
+                companionUI.UpdateStatusText("Ready - Tap to talk");
+            }
+            
+            LogMessage("✅ OpenAI response state reset - ready for new conversation");
+            return;
+        }
+        
         LogError($"OpenAI error: {fullError}");
         OnError?.Invoke($"OpenAI error: {errorMessage}");
         
-        // Reset UI state
+        // Reset UI state for other errors
         if (companionUI != null)
         {
             companionUI.ShowProcessingIndicator(false);
@@ -1883,6 +2072,7 @@ public class MobileRealtimeChat : MonoBehaviour
         
         // Mark response as no longer active
         isAIResponding = false;
+        CancelOpenAIResponse(); // Mark OpenAI response as cancelled
     }
     
     private void HandleAudioTranscriptDelta(JObject message)
@@ -2580,10 +2770,10 @@ public class MobileRealtimeChat : MonoBehaviour
         {
             LogError("Cannot deliver direct message - no active connection");
             
-            // Fall back to UI display only
+            // Fall back to UI display only using ChatPostPrefab for consistency
+            DisplayMessageInChat(message, false);
             if (companionUI != null)
             {
-                companionUI.AddMessage(message, "assistant", true);
                 companionUI.UpdateStatusText("Message delivered (no audio connection)");
             }
             return;
@@ -2612,12 +2802,13 @@ public class MobileRealtimeChat : MonoBehaviour
                 
                 LogMessage($"✅ Sent direct AI message through data channel");
                 
+                // Display message in chat using ChatPostPrefab for consistency
+                DisplayMessageInChat(message, false);
+                
                 // Update UI to show AI is speaking
                 if (companionUI != null)
                 {
-                    companionUI.AddMessage(message, "assistant", true);
                     companionUI.ShowAudioPlaybackIndicator(true);
-            companionUI.UpdateStatusText("AI is speaking...");
                     companionUI.UpdateStatusText("AI is speaking...");
                 }
             }
@@ -2625,10 +2816,10 @@ public class MobileRealtimeChat : MonoBehaviour
             {
                 LogError("Data channel not available for direct message delivery");
                 
-                // Fall back to UI display
+                // Fall back to UI display using ChatPostPrefab
+                DisplayMessageInChat(message, false);
                 if (companionUI != null)
                 {
-                    companionUI.AddMessage(message, "assistant", true);
                     companionUI.UpdateStatusText("Message delivered (audio unavailable)");
                 }
             }
@@ -2637,11 +2828,29 @@ public class MobileRealtimeChat : MonoBehaviour
         {
             LogError($"Failed to trigger direct AI message: {e.Message}");
             
-            // Fall back to UI display
+            // Fall back to UI display using ChatPostPrefab
+            DisplayMessageInChat(message, false);
             if (companionUI != null)
             {
-                companionUI.AddMessage(message, "assistant", true);
                 companionUI.UpdateStatusText("Message delivered (fallback mode)");
+            }
+        }
+    }
+    
+    // Display message in chat using ChatPostPrefab for consistency with history
+    private void DisplayMessageInChat(string message, bool isUserMessage)
+    {
+        var companionUI = FindObjectOfType<MobileCompanionUI>();
+        if (companionUI != null)
+        {
+            // Use the ChatPostPrefab system if available, otherwise fall back to AddMessage
+            if (companionUI.HasChatPostPrefab())
+            {
+                companionUI.CreateChatPostForMessage(message, isUserMessage);
+            }
+            else
+            {
+                companionUI.AddMessage(message, isUserMessage ? "user" : "assistant", true);
             }
         }
     }
@@ -2655,10 +2864,10 @@ public class MobileRealtimeChat : MonoBehaviour
         {
             LogError("Cannot trigger AI reminder - no active connection");
             
-            // Fall back to UI display only
+            // Fall back to UI display only using ChatPostPrefab for consistency
+            DisplayMessageInChat(aiMessage, false);
             if (companionUI != null)
             {
-                companionUI.AddMessage(aiMessage, "assistant", true);
                 companionUI.UpdateStatusText("Reminder delivered (no audio connection)");
             }
             return;
@@ -2672,12 +2881,9 @@ public class MobileRealtimeChat : MonoBehaviour
                 type = "conversation.item.create",
                 item = new
                 {
-                    type = "message",
-                    role = "assistant",
-                    content = new[]
-                    {
-                        new { type = "text", text = aiMessage }
-                    }
+                    type = "text",
+                    text = aiMessage,
+                    role = "assistant"
                 }
             };
             
@@ -2689,52 +2895,38 @@ public class MobileRealtimeChat : MonoBehaviour
                 byte[] messageBytes = Encoding.UTF8.GetBytes(messageJson);
                 dataChannel.Send(messageBytes);
                 
-                LogMessage($"✅ Sent AI reminder message through data channel");
+                LogMessage($"✅ Sent AI reminder through data channel");
                 
-                // Also trigger response generation
-                var responseEvent = new
-                {
-                    type = "response.create",
-                    response = new
-                    {
-                        modalities = new[] { "text", "audio" },
-                        instructions = "You just delivered a reminder to the user. Speak this message naturally and warmly."
-                    }
-                };
-                
-                string responseJson = JsonConvert.SerializeObject(responseEvent);
-                byte[] responseBytes = Encoding.UTF8.GetBytes(responseJson);
-                dataChannel.Send(responseBytes);
+                // Display message in chat using ChatPostPrefab for consistency
+                DisplayMessageInChat(aiMessage, false);
                 
                 // Update UI to show AI is speaking
                 if (companionUI != null)
                 {
-                    companionUI.AddMessage(aiMessage, "assistant", true);
                     companionUI.ShowAudioPlaybackIndicator(true);
-            companionUI.UpdateStatusText("AI is speaking...");
                     companionUI.UpdateStatusText("Delivering your reminder...");
                 }
             }
             else
             {
-                LogError("Data channel not available for reminder delivery");
+                LogError("Data channel not available for AI reminder delivery");
                 
-                // Fall back to UI display
+                // Fall back to UI display using ChatPostPrefab
+                DisplayMessageInChat(aiMessage, false);
                 if (companionUI != null)
                 {
-                    companionUI.AddMessage(aiMessage, "assistant", true);
                     companionUI.UpdateStatusText("Reminder delivered (audio unavailable)");
                 }
             }
         }
-        catch (Exception e)
+        catch (System.Exception e)
         {
             LogError($"Failed to trigger AI reminder delivery: {e.Message}");
             
-            // Fall back to UI display
+            // Fall back to UI display using ChatPostPrefab
+            DisplayMessageInChat(aiMessage, false);
             if (companionUI != null)
             {
-                companionUI.AddMessage(aiMessage, "assistant", true);
                 companionUI.UpdateStatusText("Reminder delivered (fallback mode)");
             }
         }
@@ -2745,15 +2937,6 @@ public class MobileRealtimeChat : MonoBehaviour
     public bool IsTalking => isTalking;
     public bool IsAIResponding => isAIResponding;
     
-    public bool CanStartNewConversation => !isAIResponding && !isTalking;
-    
-    public string GetConversationStatus()
-    {
-        if (isAIResponding) return "AI is responding";
-        if (isTalking) return "Recording voice input";
-        if (isConnectionActive) return "Ready for input";
-        return "Not connected";
-    }
     public AudioSource RemoteAudioSource => remoteAudioSource;
     
     public void SetRemoteAudioSource(AudioSource audioSource)
@@ -2987,5 +3170,95 @@ public class MobileRealtimeChat : MonoBehaviour
             }
             LogMessage("Realtime chat container cleared");
         }
+    }
+    
+    // Track OpenAI response state
+    private void StartOpenAIResponse(string responseId)
+    {
+        currentOpenAIResponseId = responseId;
+        isWaitingForOpenAIResponse = true;
+        lastResponseStartTime = Time.time;
+        LogMessage($"🔄 Started OpenAI response tracking: {responseId}");
+        
+        // Start timeout coroutine
+        StartCoroutine(ResponseTimeoutCoroutine());
+    }
+    
+    private void CompleteOpenAIResponse()
+    {
+        currentOpenAIResponseId = null;
+        isWaitingForOpenAIResponse = false;
+        LogMessage("✅ OpenAI response completed");
+    }
+    
+    private void CancelOpenAIResponse()
+    {
+        currentOpenAIResponseId = null;
+        isWaitingForOpenAIResponse = false;
+        LogMessage("❌ OpenAI response canceled");
+    }
+    
+    private IEnumerator ResponseTimeoutCoroutine()
+    {
+        yield return new WaitForSeconds(RESPONSE_TIMEOUT_SECONDS);
+        
+        if (isWaitingForOpenAIResponse)
+        {
+            LogWarning($"⚠️ OpenAI response timeout after {RESPONSE_TIMEOUT_SECONDS} seconds");
+            CancelOpenAIResponse();
+        }
+    }
+    
+    // Mark startup as complete - call this after initial setup is done
+    public void MarkStartupComplete()
+    {
+        if (isInitializing)
+        {
+            isInitializing = false;
+            startupCompleteTime = Time.time;
+            LogMessage($"✅ Startup protection disabled after {Time.time - startupCompleteTime:F1} seconds");
+        }
+    }
+    
+    // Startup timeout protection - automatically disables startup protection after timeout
+    private IEnumerator StartupTimeoutProtection()
+    {
+        LogMessage($"⏰ Startup protection active for {STARTUP_PROTECTION_SECONDS} seconds");
+        yield return new WaitForSeconds(STARTUP_PROTECTION_SECONDS);
+        
+        if (isInitializing)
+        {
+            LogWarning("⚠️ Startup protection timeout reached - automatically disabling protection");
+            MarkStartupComplete();
+        }
+    }
+    
+    // Trigger greeting when system is ready (called after initial sync)
+    public void TriggerGreetingWhenReady()
+    {
+        if (IsReadyForGreeting())
+        {
+            LogMessage("🚀 System ready - triggering greeting sequence");
+            StartCoroutine(DelayedAutoGreetingWithStartupProtection());
+        }
+        else
+        {
+            LogMessage("⏳ System not ready for greeting yet - will wait for readiness");
+            StartCoroutine(WaitForReadinessAndGreet());
+        }
+    }
+    
+    // Wait for system to be ready then greet
+    private IEnumerator WaitForReadinessAndGreet()
+    {
+        LogMessage("⏳ Waiting for system to be ready for greeting...");
+        
+        while (!IsReadyForGreeting())
+        {
+            yield return new WaitForSeconds(0.5f);
+        }
+        
+        LogMessage("✅ System now ready - proceeding with greeting");
+        StartCoroutine(DelayedAutoGreetingWithStartupProtection());
     }
 }
