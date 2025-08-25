@@ -256,20 +256,22 @@ public class MobileRAGCompanionSystem : MonoBehaviour
             
             LogMessage("Performing initial sync...");
             
-            // Load conversations from cloud first
-            if (networkManager.IsConnected)
-            {
-                LogMessage("Loading conversations from cloud...");
-                bool loadedFromCloud = await conversationCache.LoadConversationsFromCloudAsync(userId, 20);
-                if (loadedFromCloud)
-                {
-                    LogMessage("Successfully loaded conversations from cloud");
-                }
-                else
-                {
-                    LogMessage("Failed to load conversations from cloud, using local cache only");
-                }
-            }
+            // Load conversations from cloud (temporarily disabled for testing)
+            // var conversationCache = FindObjectOfType<MobileConversationCache>();
+            // if (conversationCache != null)
+            // {
+            //     LogMessage("🔄 Loading conversations from cloud...");
+            //     var loadTask = conversationCache.LoadConversationsFromCloudAsync(userId, 20);
+            //     while (!loadTask.IsCompleted)
+            //     {
+            //         await Task.Yield();
+            //     }
+            //     LogMessage($"✅ Cloud conversation loading completed: {loadTask.Result}");
+            // }
+            // else
+            // {
+            //     LogWarning("⚠️ Conversation cache not found - skipping cloud conversation loading");
+            // }
             
             // Sync unsynced conversations
             var unsyncedConversations = conversationCache.GetUnsyncedConversationsAsync(50);

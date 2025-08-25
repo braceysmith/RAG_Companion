@@ -445,10 +445,12 @@ public class MobileRealtimeChat : MonoBehaviour
             // Generate appropriate greeting based on whether we know the name
             string greetingMessage = GenerateGreetingMessage(userName);
             
-            LogMessage($"📢 Delivering greeting: {greetingMessage}");
+            LogMessage($"📢 Delivering greeting: '{greetingMessage}'");
+            LogMessage($"📏 Greeting message length: {greetingMessage.Length} characters");
+            LogMessage($"🔤 Greeting message words: {greetingMessage.Split(' ').Length} words");
             
-            // Deliver greeting directly through voice system (bypassing full AI conversation)
-            TriggerDirectAIMessage(greetingMessage);
+            // Use simplified welcome method to avoid word-by-word processing
+            DeliverSimpleWelcome(greetingMessage);
         }));
     }
     
@@ -468,12 +470,14 @@ public class MobileRealtimeChat : MonoBehaviour
         var companionUI = FindObjectOfType<MobileCompanionUI>();
         if (companionUI != null)
         {
-            while (companionUI.IsLoadingHistory)
-            {
-                LogMessage("⏳ Waiting for conversation history to finish loading...");
-                yield return new WaitForSeconds(0.5f); // Check every 500ms
-            }
-            LogMessage("✅ Conversation history loaded, proceeding with greeting...");
+            // Temporarily disabled conversation history loading for testing
+            // while (companionUI.IsLoadingHistory)
+            // {
+            //     LogMessage("⏳ Waiting for conversation history to finish loading...");
+            //     yield return new WaitForSeconds(0.5f); // Check every 500ms
+            // }
+            // LogMessage("✅ Conversation history loaded, proceeding with greeting...");
+            LogMessage("⏳ Conversation history loading temporarily disabled for testing");
         }
         
         LogMessage($"⏳ Now waiting {greetingDelay} seconds before greeting...");
@@ -496,8 +500,8 @@ public class MobileRealtimeChat : MonoBehaviour
             LogMessage($"📏 Greeting message length: {greetingMessage.Length} characters");
             LogMessage($"🔤 Greeting message words: {greetingMessage.Split(' ').Length} words");
             
-            // Deliver greeting directly through voice system (bypassing full AI conversation)
-            TriggerDirectAIMessage(greetingMessage);
+            // Use simplified welcome method to avoid word-by-word processing
+            DeliverSimpleWelcome(greetingMessage);
         }));
     }
     
@@ -1832,6 +1836,8 @@ public class MobileRealtimeChat : MonoBehaviour
                 ["modalities"] = new JArray { "text", "audio" }
             }
         };
+        
+        LogMessage($"🔍 DEBUG: Sending response.create with modalities: {responseEvt["response"]["modalities"]}");
         dataChannel.Send(Encoding.UTF8.GetBytes(responseEvt.ToString(Formatting.None)));
         
         LogMessage($"Sent text message and created response: {message}");
@@ -2185,7 +2191,9 @@ public class MobileRealtimeChat : MonoBehaviour
             ["user_id"] = userId
         };
         
-        using (UnityWebRequest request = new UnityWebRequest($"{ragApiUrl}/generate_image", "POST"))
+        string currentRagApiUrl = GetCurrentCloudRAGUrl();
+        
+        using (UnityWebRequest request = new UnityWebRequest($"{currentRagApiUrl}/generate_image", "POST"))
         {
             byte[] bodyRaw = Encoding.UTF8.GetBytes(requestBody.ToString());
             request.uploadHandler = new UploadHandlerRaw(bodyRaw);
@@ -2252,7 +2260,9 @@ public class MobileRealtimeChat : MonoBehaviour
             ["user_id"] = userId
         };
         
-        using (UnityWebRequest request = new UnityWebRequest($"{ragApiUrl}/analyze_image", "POST"))
+        string currentRagApiUrl = GetCurrentCloudRAGUrl();
+        
+        using (UnityWebRequest request = new UnityWebRequest($"{currentRagApiUrl}/analyze_image", "POST"))
         {
             byte[] bodyRaw = Encoding.UTF8.GetBytes(requestBody.ToString());
             request.uploadHandler = new UploadHandlerRaw(bodyRaw);
@@ -2332,6 +2342,8 @@ public class MobileRealtimeChat : MonoBehaviour
         {
             ["type"] = "response.create"
         };
+        
+        LogMessage($"🔍 DEBUG: Sending response.create (no modalities specified) for function call result");
         
         if (dataChannel?.ReadyState == RTCDataChannelState.Open)
         {
@@ -2783,26 +2795,31 @@ public class MobileRealtimeChat : MonoBehaviour
         
         try
         {
-            // Create a simple response event to make AI speak the message directly
-            var responseEvent = new
+            // Create a conversation item event to make AI speak the message directly
+            // Using conversation.item.create instead of response.create to prevent word-by-word processing
+            var messageEvent = new
             {
-                type = "response.create",
-                response = new
+                type = "conversation.item.create",
+                item = new
                 {
-                    modalities = new[] { "text", "audio" },
-                    instructions = $"Simply say this message exactly as written, in a warm and friendly tone: '{message}'"
+                    type = "message",
+                    role = "assistant",
+                    content = new[]
+                    {
+                        new { type = "text", text = message }
+                    }
                 }
             };
             
-            string responseJson = JsonConvert.SerializeObject(responseEvent);
+            string messageJson = JsonConvert.SerializeObject(messageEvent);
             
             // Send through data channel
             if (dataChannel != null && dataChannel.ReadyState == RTCDataChannelState.Open)
             {
-                byte[] responseBytes = Encoding.UTF8.GetBytes(responseJson);
-                dataChannel.Send(responseBytes);
+                byte[] messageBytes = Encoding.UTF8.GetBytes(messageJson);
+                dataChannel.Send(messageBytes);
                 
-                LogMessage($"✅ Sent direct AI message through data channel");
+                LogMessage($"✅ Sent direct AI message through data channel as conversation item");
                 
                 // Display message in chat using ChatPostPrefab for consistency
                 DisplayMessageInChat(message, false);
@@ -3134,6 +3151,8 @@ public class MobileRealtimeChat : MonoBehaviour
                 ["type"] = "response.create"
             };
             
+            LogMessage($"🔍 DEBUG: Sending response.create (no modalities specified) for image analysis");
+            
             dataChannel.Send(Encoding.UTF8.GetBytes(responseCreate.ToString(Formatting.None)));
             LogMessage("🚀 Requested AI response for image analysis - waiting for response...");
         }
@@ -3285,4 +3304,101 @@ public class MobileRealtimeChat : MonoBehaviour
     
     // Track if greeting has been triggered to prevent duplicates
     private bool greetingTriggered = false;
+    
+    // Simplified welcome method that bypasses complex realtime processing
+    private void DeliverSimpleWelcome(string message)
+    {
+        LogMessage($"🎯 Delivering simple welcome: '{message}'");
+        
+        // Display message in chat immediately
+        DisplayMessageInChat(message, false);
+        
+        // Update UI status
+        if (companionUI != null)
+        {
+            companionUI.UpdateStatusText("Welcome message delivered");
+        }
+        
+        // Try to trigger audio through the correct OpenAI API
+        if (isConnectionActive && dataChannel != null && dataChannel.ReadyState == RTCDataChannelState.Open)
+        {
+            // First create the conversation item
+            var messageEvent = new
+            {
+                type = "conversation.item.create",
+                item = new
+                {
+                    type = "message",
+                    role = "assistant",
+                    content = new[]
+                    {
+                        new { type = "text", text = message }
+                    }
+                }
+            };
+            
+            try
+            {
+                // Send the message
+                string messageJson = JsonConvert.SerializeObject(messageEvent);
+                byte[] messageBytes = Encoding.UTF8.GetBytes(messageJson);
+                dataChannel.Send(messageBytes);
+                
+                LogMessage("✅ Sent welcome message as conversation item");
+                
+                // Then create a response to generate audio
+                var responseEvent = new
+                {
+                    type = "response.create",
+                    response = new
+                    {
+                        modalities = new[] { "audio", "text" },
+                        instructions = "Speak this message naturally and warmly"
+                    }
+                };
+                
+                LogMessage($"🔍 DEBUG: Sending welcome response.create with modalities: [{string.Join(", ", responseEvent.response.modalities)}]");
+                
+                string responseJson = JsonConvert.SerializeObject(responseEvent);
+                byte[] responseBytes = Encoding.UTF8.GetBytes(responseJson);
+                dataChannel.Send(responseBytes);
+                
+                LogMessage("✅ Sent response.create request for audio generation");
+                
+                if (companionUI != null)
+                {
+                    companionUI.ShowAudioPlaybackIndicator(true);
+                    companionUI.UpdateStatusText("AI is speaking welcome message...");
+                }
+            }
+            catch (System.Exception e)
+            {
+                LogError($"Failed to send welcome message: {e.Message}");
+            }
+        }
+        else
+        {
+            LogMessage("⚠️ No audio connection available for welcome message");
+        }
+    }
+    
+    // Get the current cloud RAG URL dynamically
+    private string GetCurrentCloudRAGUrl()
+    {
+        // Try to get the URL from the companion system first
+        var companionSystem = FindFirstObjectByType<MobileRAGCompanionSystem>();
+        if (companionSystem != null)
+        {
+            string dynamicUrl = companionSystem.GetCloudRAGUrl();
+            if (!string.IsNullOrEmpty(dynamicUrl) && !IsPlaceholderUrl(dynamicUrl))
+            {
+                LogMessage($"Using dynamic cloud RAG URL: {dynamicUrl}");
+                return dynamicUrl;
+            }
+        }
+        
+        // Fall back to the configured URL
+        LogMessage($"Using configured RAG API URL: {ragApiUrl}");
+        return ragApiUrl;
+    }
 }

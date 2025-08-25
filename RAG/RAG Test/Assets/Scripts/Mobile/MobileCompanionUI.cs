@@ -2129,6 +2129,13 @@ public class MobileCompanionUI : MonoBehaviour
         {
             LogMessage($"Populating chat with {conversations.Count} loaded conversations");
             
+            // Debug: Log the raw conversation data
+            for (int i = 0; i < conversations.Count; i++)
+            {
+                var conv = conversations[i];
+                LogMessage($"Conversation {i}: User='{conv.user_message?.Substring(0, Math.Min(50, conv.user_message?.Length ?? 0))}...', AI='{conv.assistant_message?.Substring(0, Math.Min(50, conv.assistant_message?.Length ?? 0))}...', Timestamp='{conv.timestamp}'");
+            }
+            
             // Set flag to prevent duplicate messages during history loading
             isLoadingHistory = true;
             
@@ -2151,6 +2158,8 @@ public class MobileCompanionUI : MonoBehaviour
                     }
                 })
                 .ToList();
+            
+            LogMessage($"Filtered to {sortedConversations.Count} valid conversations");
             
             foreach (var conv in sortedConversations)
             {

@@ -23,7 +23,17 @@ public class ChatPostPrefab : MonoBehaviour, IPointerClickHandler
     // Property to access the text content
     public string text { 
         get { return bodyDisplay != null ? bodyDisplay.text : ""; }
-        set { if (bodyDisplay != null) bodyDisplay.text = value; }
+        set { 
+            if (bodyDisplay != null) 
+            {
+                bodyDisplay.text = value;
+                Debug.Log($"[ChatPostPrefab] Text set successfully: '{value.Substring(0, Math.Min(50, value.Length))}...' (Length: {value.Length})");
+            }
+            else 
+            {
+                Debug.LogError($"[ChatPostPrefab] Cannot set text: bodyDisplay is null. Text was: '{value.Substring(0, Math.Min(50, value.Length))}...'");
+            }
+        }
     }
     
     // Property to access the image content
@@ -58,6 +68,15 @@ public class ChatPostPrefab : MonoBehaviour, IPointerClickHandler
     private void Start()
     {
         // Auto-find components if not assigned
+        EnsureComponentsFound();
+        
+        // Initialize UI
+        UpdateUI();
+    }
+    
+    // Ensure all required components are found
+    private void EnsureComponentsFound()
+    {
         if (backgroundImage == null)
             backgroundImage = GetComponent<Image>();
             
@@ -68,16 +87,20 @@ public class ChatPostPrefab : MonoBehaviour, IPointerClickHandler
             contentRawImage = transform.Find("ContentRawImage")?.GetComponent<RawImage>();
             
         if (bodyDisplay == null)
-            bodyDisplay = transform.Find("Body")?.GetComponent<TMP_Text>() ?? GetComponentInChildren<TMP_Text>();
+        {
+            bodyDisplay = transform.Find("Body")?.GetComponent<TMP_Text>();
+            if (bodyDisplay == null)
+            {
+                bodyDisplay = GetComponentInChildren<TMP_Text>();
+            }
+            Debug.Log($"[ChatPostPrefab] bodyDisplay found: {(bodyDisplay != null ? "YES" : "NO")} (Path: {transform.name})");
+        }
             
         if (typeDisplay == null)
             typeDisplay = transform.Find("Type")?.GetComponent<TMP_Text>();
             
         if (titleDisplay == null)
             titleDisplay = transform.Find("Title")?.GetComponent<TMP_Text>();
-        
-        // Initialize UI
-        UpdateUI();
     }
     
     // Handle tap/click events on the chat post
@@ -359,7 +382,6 @@ public class ChatPostPrefab : MonoBehaviour, IPointerClickHandler
                           string subcategory = "", int tier = 0)
     {
         type = postType;
-        text = postText;
         human = isHuman;
         
         goalID = postGoalID;
@@ -371,6 +393,12 @@ public class ChatPostPrefab : MonoBehaviour, IPointerClickHandler
         categoryName = category;
         subcategoryName = subcategory;
         tierIndex = tier;
+        
+        // Ensure components are found before setting text
+        EnsureComponentsFound();
+        
+        // Now set the text after components are guaranteed to be found
+        text = postText;
         
         // Hide both image components for text-only posts
         if (contentImage != null) contentImage.gameObject.SetActive(false);
@@ -386,8 +414,23 @@ public class ChatPostPrefab : MonoBehaviour, IPointerClickHandler
                                    string category = "", string subcategory = "", int tier = 0)
     {
         type = postType;
-        text = postText;
         human = isHuman;
+        
+        goalID = postGoalID;
+        resourceID = postResourceID;
+        resourceLink = link;
+        originalPostTime = DateTime.Now;
+        
+        // Set category information for user data management
+        categoryName = category;
+        subcategoryName = subcategory;
+        tierIndex = tier;
+        
+        // Ensure components are found before setting text
+        EnsureComponentsFound();
+        
+        // Now set the text after components are guaranteed to be found
+        text = postText;
         
         if (postImage != null && contentImage != null)
         {
@@ -402,16 +445,6 @@ public class ChatPostPrefab : MonoBehaviour, IPointerClickHandler
             if (contentRawImage != null) contentRawImage.gameObject.SetActive(false);
         }
         
-        goalID = postGoalID;
-        resourceID = postResourceID;
-        resourceLink = link;
-        originalPostTime = DateTime.Now;
-        
-        // Set category information for user data management
-        categoryName = category;
-        subcategoryName = subcategory;
-        tierIndex = tier;
-        
         UpdateUI();
     }
     
@@ -422,8 +455,23 @@ public class ChatPostPrefab : MonoBehaviour, IPointerClickHandler
                                      string category = "", string subcategory = "", int tier = 0)
     {
         type = postType;
-        text = postText;
         human = isHuman;
+        
+        goalID = postGoalID;
+        resourceID = postResourceID;
+        resourceLink = link;
+        originalPostTime = DateTime.Now;
+        
+        // Set category information for user data management
+        categoryName = category;
+        subcategoryName = subcategory;
+        tierIndex = tier;
+        
+        // Ensure components are found before setting text
+        EnsureComponentsFound();
+        
+        // Now set the text after components are guaranteed to be found
+        text = postText;
         
         if (postTexture != null && contentRawImage != null)
         {
@@ -437,16 +485,6 @@ public class ChatPostPrefab : MonoBehaviour, IPointerClickHandler
             contentRawImage.gameObject.SetActive(true);
             if (contentImage != null) contentImage.gameObject.SetActive(false);
         }
-        
-        goalID = postGoalID;
-        resourceID = postResourceID;
-        resourceLink = link;
-        originalPostTime = DateTime.Now;
-        
-        // Set category information for user data management
-        categoryName = category;
-        subcategoryName = subcategory;
-        tierIndex = tier;
         
         UpdateUI();
     }

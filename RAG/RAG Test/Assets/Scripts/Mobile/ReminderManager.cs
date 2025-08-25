@@ -452,8 +452,18 @@ public class ReminderManager : MonoBehaviour
                         var mobileChat = FindFirstObjectByType<MobileRealtimeChat>();
                         if (mobileChat != null)
                         {
-                            // Send the AI message as if it's starting a new conversation
-                            mobileChat.TriggerAIReminderDelivery(aiMessage);
+                            // Check if the connection is active before attempting AI delivery
+                            if (mobileChat.IsConnected)
+                            {
+                                // Send the AI message as if it's starting a new conversation
+                                mobileChat.TriggerAIReminderDelivery(aiMessage);
+                            }
+                            else
+                            {
+                                Debug.LogWarning("🔔 MobileRealtimeChat connection not active - AI reminder message cannot be delivered audibly");
+                                // Fallback: just log the reminder content
+                                Debug.Log($"📝 Reminder content (no audio): {aiMessage}");
+                            }
                         }
                         else
                         {

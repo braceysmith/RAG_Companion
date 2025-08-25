@@ -94,6 +94,7 @@ public class MobileConversationCache : MonoBehaviour
     public event Action OnCacheReady;
     public event Action<int> OnCacheCleanupCompleted;
     public event Action<string> OnCacheError;
+    public event Action<List<CloudConversation>> OnConversationsLoaded;
     
     private void Start()
     {
@@ -335,29 +336,28 @@ public class MobileConversationCache : MonoBehaviour
     
     public async Task<bool> LoadConversationsFromCloudAsync(string userId, int limit = 20)
     {
-        if (!isInitialized)
-        {
-            LogError("Cache not initialized");
-            return false;
-        }
-        
         try
         {
-            LogMessage($"Loading conversations from cloud for user: {userId}");
+            LogMessage($"🔄 Loading conversations from cloud for user: {userId}");
             
             // Get cloud RAG URL from companion system
             var companionSystem = FindObjectOfType<MobileRAGCompanionSystem>();
             if (companionSystem == null)
             {
-                LogError("Companion system not found");
+                LogError("❌ Companion system not found");
                 return false;
             }
             
             string cloudUrl = companionSystem.GetCloudRAGUrl();
-            string url = $"{cloudUrl}/conversations/{userId}?limit={limit}";
+            string apiUrl = $"{cloudUrl}/conversations/{userId}?limit={limit}";
+            LogMessage($"📡 API URL: {apiUrl}");
             
-            using (var request = UnityWebRequest.Get(url))
+            using (UnityWebRequest request = UnityWebRequest.Get(apiUrl))
             {
+                // Add headers if needed
+                request.SetRequestHeader("Content-Type", "application/json");
+                
+                // Send the request
                 var operation = request.SendWebRequest();
                 
                 while (!operation.isDone)
@@ -367,77 +367,98 @@ public class MobileConversationCache : MonoBehaviour
                 
                 if (request.result == UnityWebRequest.Result.Success)
                 {
-                    var response = JsonConvert.DeserializeObject<CloudConversationResponse>(request.downloadHandler.text);
+                    string responseText = request.downloadHandler.text;
+                    LogMessage($"📥 Raw response received: {responseText.Substring(0, Math.Min(200, responseText.Length))}...");
                     
-                    if (response != null && response.conversations != null)
+                    try
                     {
-                        LogMessage($"Loaded {response.conversations.Count} conversations from cloud");
+                        // Parse the server response using the simple structure
+                        var response = JsonConvert.DeserializeObject<CloudConversationResponse>(request.downloadHandler.text);
                         
-                        // Convert cloud conversations to local format and store
-                        foreach (var cloudConv in response.conversations)
+                        if (response != null && response.conversations != null && response.conversations.Count > 0)
                         {
-                            // Skip conversations with missing required fields
-                            if (string.IsNullOrEmpty(cloudConv.id) || 
-                                string.IsNullOrEmpty(cloudConv.user_message) || 
-                                string.IsNullOrEmpty(cloudConv.assistant_message))
+                            LogMessage($"✅ Successfully parsed {response.conversations.Count} conversations from cloud");
+                            
+                            // Debug: Log each conversation
+                            for (int i = 0; i < response.conversations.Count; i++)
                             {
-                                LogMessage($"Skipping conversation with missing fields: id={cloudConv.id}, user_msg={!string.IsNullOrEmpty(cloudConv.user_message)}, assistant_msg={!string.IsNullOrEmpty(cloudConv.assistant_message)}");
-                                continue;
+                                var conv = response.conversations[i];
+                                LogMessage($"Conversation {i}: ID={conv.id}, User='{conv.user_message?.Substring(0, Math.Min(50, conv.user_message?.Length ?? 0))}...', AI='{conv.assistant_message?.Substring(0, Math.Min(50, conv.assistant_message?.Length ?? 0))}...'");
                             }
                             
-                            // Parse timestamp safely
-                            DateTime parsedTimestamp = DateTime.UtcNow; // Default to now if parsing fails
-                            if (!string.IsNullOrEmpty(cloudConv.timestamp))
+                            // Filter out invalid conversations
+                            var validConversations = response.conversations.Where(cloudConv =>
+                                !string.IsNullOrEmpty(cloudConv.id) &&
+                                !string.IsNullOrEmpty(cloudConv.user_message) &&
+                                !string.IsNullOrEmpty(cloudConv.assistant_message)
+                            ).ToList();
+                            
+                            LogMessage($"🔍 Filtered to {validConversations.Count} valid conversations");
+                            
+                            if (validConversations.Count > 0)
                             {
-                                try
+                                // Convert to local format and store
+                                foreach (var cloudConv in validConversations)
                                 {
-                                    parsedTimestamp = DateTime.Parse(cloudConv.timestamp);
+                                    var localConv = new CachedConversation
+                                    {
+                                        id = cloudConv.id,
+                                        userId = cloudConv.user_id,
+                                        userMessage = cloudConv.user_message,
+                                        assistantMessage = cloudConv.assistant_message,
+                                        timestamp = DateTime.TryParse(cloudConv.timestamp, out DateTime parsedTime) ? parsedTime : DateTime.Now,
+                                        sessionId = Guid.NewGuid().ToString(), // Generate new session ID for cloud conversations
+                                        metadata = new Dictionary<string, object>(),
+                                        synced = true
+                                    };
+                                    
+                                    conversationCache.conversations.Add(localConv);
+                                    LogMessage($"💾 Stored conversation: {localConv.userMessage.Substring(0, Math.Min(30, localConv.userMessage.Length))}... -> {localConv.assistantMessage.Substring(0, Math.Min(30, localConv.assistantMessage.Length))}...");
                                 }
-                                catch (Exception parseEx)
+                                
+                                // Save to local storage
+                                await SaveCacheData();
+                                
+                                LogMessage($"✅ Successfully loaded and stored {validConversations.Count} conversations from cloud");
+                                
+                                // Notify UI to populate chat
+                                if (OnConversationsLoaded != null)
                                 {
-                                    LogMessage($"Failed to parse timestamp '{cloudConv.timestamp}', using current time: {parseEx.Message}");
+                                    OnConversationsLoaded?.Invoke(validConversations);
                                 }
+                                
+                                return true; // Return success
                             }
-                            
-                            var cachedConv = new CachedConversation
+                            else
                             {
-                                id = cloudConv.id,
-                                userId = cloudConv.user_id ?? userId, // Fallback to current userId if null
-                                userMessage = cloudConv.user_message,
-                                assistantMessage = cloudConv.assistant_message,
-                                timestamp = parsedTimestamp,
-                                synced = true
-                            };
-                            
-                            // Store in local cache
-                            await StoreConversationAsync(cachedConv.userId, cachedConv.userMessage, cachedConv.assistantMessage, null);
+                                LogWarning("⚠️ No valid conversations found in cloud response");
+                                return false; // Return no conversations
+                            }
                         }
-                        
-                        // Notify UI to populate chat with loaded conversations
-                        if (response.conversations.Count > 0)
+                        else
                         {
-                            var companionUI = FindObjectOfType<MobileCompanionUI>();
-                            if (companionUI != null)
-                            {
-                                companionUI.PopulateChatWithHistory(response.conversations);
-                            }
+                            LogWarning("⚠️ No conversations found in cloud response");
+                            return false; // Return no conversations
                         }
-                        
-                        return true;
+                    }
+                    catch (System.Exception parseEx)
+                    {
+                        LogError($"❌ Failed to parse cloud response: {parseEx.Message}");
+                        LogError($"📄 Response text: {responseText}");
+                        return false; // Return parsing error
                     }
                 }
                 else
                 {
-                    LogError($"Failed to load conversations from cloud: {request.error}");
+                    LogError($"❌ Failed to load conversations from cloud: {request.error}");
+                    return false; // Return network error
                 }
             }
-            
-            return false;
         }
         catch (Exception ex)
         {
-            LogError($"Failed to load conversations from cloud: {ex.Message}");
-            return false;
+            LogError($"❌ Exception in LoadConversationsFromCloudAsync: {ex.Message}");
+            return false; // Return exception error
         }
     }
     
@@ -642,6 +663,11 @@ public class MobileConversationCache : MonoBehaviour
     private void LogError(string message)
     {
         Debug.LogError($"[MobileConversationCache] {message}");
+    }
+
+    private void LogWarning(string message)
+    {
+        Debug.LogWarning($"[MobileConversationCache] {message}");
     }
     
     private void OnDestroy()
