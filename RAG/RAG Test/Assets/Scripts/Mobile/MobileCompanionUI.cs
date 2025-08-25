@@ -1903,7 +1903,7 @@ public class MobileCompanionUI : MonoBehaviour
         }
     }
     
-    private void OnAssistantResponse(string response)
+    public void OnAssistantResponse(string response)
     {
         LogMessage($"Assistant response received: {response.Substring(0, Math.Min(50, response.Length))}...");
         AddMessage(response, "assistant");

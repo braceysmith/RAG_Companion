@@ -8,6 +8,24 @@ using Newtonsoft.Json;
 using UnityEngine.Networking;
 
 [System.Serializable]
+public class ConversationSummary
+{
+    public string user_id;
+    public string summary;
+    public List<RecentExchange> last_exchanges;
+    public string last_updated;
+    public int exchange_count;
+}
+
+[System.Serializable]
+public class RecentExchange
+{
+    public string user_message;
+    public string ai_response;
+    public string timestamp;
+}
+
+[System.Serializable]
 public class CloudConversationResponse
 {
     public string user_id;
@@ -95,6 +113,237 @@ public class MobileConversationCache : MonoBehaviour
     public event Action<int> OnCacheCleanupCompleted;
     public event Action<string> OnCacheError;
     public event Action<List<CloudConversation>> OnConversationsLoaded;
+    public event Action<ConversationSummary> OnSummaryLoaded;
+    
+    // Summary management
+    private ConversationSummary currentSummary;
+    private int exchangeCounter = 0;
+    [SerializeField] private int summaryUpdateInterval = 5; // Update summary every 5 exchanges
+    
+    // Get the current conversation summary
+    public ConversationSummary GetCurrentSummary()
+    {
+        return currentSummary;
+    }
+    
+    // Add a new exchange to the summary
+    public void AddExchange(string userMessage, string aiResponse)
+    {
+        if (currentSummary == null)
+        {
+            currentSummary = new ConversationSummary
+            {
+                user_id = "mobile-bracey02", // TODO: Get from system
+                summary = "",
+                last_exchanges = new List<RecentExchange>(),
+                last_updated = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ"),
+                exchange_count = 0
+            };
+        }
+        
+        // Add to recent exchanges
+        var exchange = new RecentExchange
+        {
+            user_message = userMessage,
+            ai_response = aiResponse,
+            timestamp = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ")
+        };
+        
+        currentSummary.last_exchanges.Add(exchange);
+        currentSummary.exchange_count++;
+        
+        // Keep only last 5 exchanges
+        if (currentSummary.last_exchanges.Count > 5)
+        {
+            currentSummary.last_exchanges.RemoveAt(0);
+        }
+        
+        // Update summary every N exchanges
+        if (currentSummary.exchange_count % summaryUpdateInterval == 0)
+        {
+            UpdateSummary();
+        }
+        
+        LogMessage($"📝 Added exchange {currentSummary.exchange_count}: User='{userMessage.Substring(0, Math.Min(30, userMessage.Length))}...', AI='{aiResponse.Substring(0, Math.Min(30, aiResponse.Length))}...'");
+    }
+    
+    // Update the conversation summary
+    private void UpdateSummary()
+    {
+        if (currentSummary == null || currentSummary.last_exchanges.Count == 0)
+            return;
+            
+        // Create a simple bullet-point summary
+        var summaryBuilder = new System.Text.StringBuilder();
+        
+        foreach (var exchange in currentSummary.last_exchanges)
+        {
+            summaryBuilder.AppendLine($"• User: {exchange.user_message}");
+            summaryBuilder.AppendLine($"• AI: {exchange.ai_response}");
+        }
+        
+        summaryBuilder.AppendLine($"• Key Topics: {ExtractKeyTopics()}");
+        summaryBuilder.AppendLine($"• Total Exchanges: {currentSummary.exchange_count}");
+        
+        currentSummary.summary = summaryBuilder.ToString().Trim();
+        currentSummary.last_updated = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ");
+        
+        LogMessage($"📝 Updated summary ({currentSummary.summary.Length} chars): {currentSummary.summary.Substring(0, Math.Min(100, currentSummary.summary.Length))}...");
+        
+        // Save to RAG server
+        SaveSummaryToRAG();
+    }
+    
+    // Extract key topics from recent exchanges
+    private string ExtractKeyTopics()
+    {
+        var topics = new HashSet<string>();
+        
+        foreach (var exchange in currentSummary.last_exchanges)
+        {
+            // Simple topic extraction - could be enhanced with AI
+            var combinedText = $"{exchange.user_message} {exchange.ai_response}".ToLower();
+            
+            if (combinedText.Contains("memory") || combinedText.Contains("remember"))
+                topics.Add("Memory");
+            if (combinedText.Contains("reminder") || combinedText.Contains("remind"))
+                topics.Add("Reminders");
+            if (combinedText.Contains("help") || combinedText.Contains("assist"))
+                topics.Add("Help/Support");
+            if (combinedText.Contains("hello") || combinedText.Contains("hi"))
+                topics.Add("Greetings");
+        }
+        
+        return topics.Count > 0 ? string.Join(", ", topics) : "General conversation";
+    }
+    
+    // Save summary to RAG server
+    private async void SaveSummaryToRAG()
+    {
+        if (currentSummary == null)
+            return;
+            
+        try
+        {
+            var companionSystem = FindFirstObjectByType<MobileRAGCompanionSystem>();
+            if (companionSystem == null)
+            {
+                LogError("❌ Companion system not found - cannot save summary to RAG");
+                return;
+            }
+            
+            string cloudUrl = companionSystem.GetCloudRAGUrl();
+            string apiUrl = $"{cloudUrl}/conversations/{currentSummary.user_id}/summary";
+            
+            var summaryData = new
+            {
+                summary = currentSummary.summary,
+                last_exchanges = currentSummary.last_exchanges,
+                metadata = new
+                {
+                    last_updated = currentSummary.last_updated,
+                    exchange_count = currentSummary.exchange_count
+                }
+            };
+            
+            string jsonPayload = JsonConvert.SerializeObject(summaryData);
+            
+            using (UnityWebRequest request = new UnityWebRequest(apiUrl, "POST"))
+            {
+                byte[] bodyRaw = System.Text.Encoding.UTF8.GetBytes(jsonPayload);
+                request.uploadHandler = new UploadHandlerRaw(bodyRaw);
+                request.downloadHandler = new DownloadHandlerBuffer();
+                request.SetRequestHeader("Content-Type", "application/json");
+                
+                var operation = request.SendWebRequest();
+                while (!operation.isDone)
+                {
+                    await Task.Yield();
+                }
+                
+                if (request.result == UnityWebRequest.Result.Success)
+                {
+                    LogMessage($"✅ Summary saved to RAG server successfully");
+                }
+                else
+                {
+                    LogError($"❌ Failed to save summary to RAG: {request.error}");
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            LogError($"❌ Exception saving summary to RAG: {ex.Message}");
+        }
+    }
+    
+    // Load summary from RAG server
+    public async Task<bool> LoadSummaryFromRAG(string userId)
+    {
+        try
+        {
+            var companionSystem = FindFirstObjectByType<MobileRAGCompanionSystem>();
+            if (companionSystem == null)
+            {
+                LogError("❌ Companion system not found - cannot load summary from RAG");
+                return false;
+            }
+            
+            string cloudUrl = companionSystem.GetCloudRAGUrl();
+            string apiUrl = $"{cloudUrl}/conversations/{userId}/summary";
+            
+            using (UnityWebRequest request = UnityWebRequest.Get(apiUrl))
+            {
+                request.SetRequestHeader("Content-Type", "application/json");
+                
+                var operation = request.SendWebRequest();
+                while (!operation.isDone)
+                {
+                    await Task.Yield();
+                }
+                
+                if (request.result == UnityWebRequest.Result.Success)
+                {
+                    try
+                    {
+                        var response = JsonConvert.DeserializeObject<ConversationSummary>(request.downloadHandler.text);
+                        
+                        if (response != null && !string.IsNullOrEmpty(response.summary))
+                        {
+                            currentSummary = response;
+                            LogMessage($"✅ Loaded summary from RAG: {response.summary.Substring(0, Math.Min(100, response.summary.Length))}...");
+                            
+                            // Notify UI that summary is loaded
+                            OnSummaryLoaded?.Invoke(currentSummary);
+                            return true;
+                        }
+                        else
+                        {
+                            LogMessage("📝 No existing summary found - starting fresh");
+                            return false;
+                        }
+                    }
+                    catch (Exception parseEx)
+                    {
+                        LogError($"❌ Failed to parse summary response: {parseEx.Message}");
+                        return false;
+                    }
+                }
+                else
+                {
+                    LogMessage($"📝 No summary found on server: {request.error}");
+                    return false;
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            LogError($"❌ Exception loading summary from RAG: {ex.Message}");
+            return false;
+        }
+        
+        return false;
+    }
     
     private void Start()
     {

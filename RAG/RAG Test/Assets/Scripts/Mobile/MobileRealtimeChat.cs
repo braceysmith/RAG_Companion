@@ -97,7 +97,7 @@ public class MobileRealtimeChat : MonoBehaviour
     private string currentOpenAIResponseId = null;
     private bool isWaitingForOpenAIResponse = false;
     private float lastResponseStartTime = 0f;
-    private const float RESPONSE_TIMEOUT_SECONDS = 30f; // Timeout for OpenAI responses
+    private const float RESPONSE_TIMEOUT_SECONDS = 120f; // Increased from 30s to 120s for complex responses
     
     // Startup protection to prevent initial conversation conflicts
     private bool isInitializing = true;
@@ -154,6 +154,20 @@ public class MobileRealtimeChat : MonoBehaviour
         return isConnectionActive;
     }
     
+    // Debug method to check connection status
+    public void LogConnectionStatus()
+    {
+        LogMessage($"🔍 CONNECTION STATUS CHECK:");
+        LogMessage($"   - isConnectionActive: {isConnectionActive}");
+        LogMessage($"   - dataChannel != null: {dataChannel != null}");
+        LogMessage($"   - dataChannel.ReadyState: {(dataChannel != null ? dataChannel.ReadyState.ToString() : "NULL")}");
+        LogMessage($"   - isInitializing: {isInitializing}");
+        LogMessage($"   - isAIResponding: {isAIResponding}");
+        LogMessage($"   - isWaitingForOpenAIResponse: {isWaitingForOpenAIResponse}");
+        LogMessage($"   - lastResponseTime: {lastResponseTime}");
+        LogMessage($"   - Time since last response: {Time.time - lastResponseTime:F1}s");
+    }
+    
     // Force reset conversation state for emergency recovery
     public void ForceResetConversationState()
     {
@@ -186,6 +200,9 @@ public class MobileRealtimeChat : MonoBehaviour
     
     private void Start()
     {
+        // Reset greeting flags on each app start to prevent duplicate welcomes
+        greetingTriggered = false;
+        
         // Initialize Unity audio settings for better WebRTC compatibility
         AudioConfiguration audioConfig = AudioSettings.GetConfiguration();
         audioConfig.sampleRate = 24000; // Common rate for voice
@@ -427,33 +444,6 @@ public class MobileRealtimeChat : MonoBehaviour
         }
     }
     
-    private IEnumerator DelayedAutoGreeting()
-    {
-        LogMessage($"⏳ Waiting {greetingDelay} seconds before greeting user...");
-        yield return new WaitForSeconds(greetingDelay);
-        
-        if (!isConnectionActive)
-        {
-            LogMessage("⚠️ Connection lost before greeting could be delivered");
-            yield break;
-        }
-        
-        LogMessage("🤝 Generating personalized greeting...");
-        
-        // Get user's name from RAG system using coroutine
-        yield return StartCoroutine(GetUserNameCoroutine((userName) => {
-            // Generate appropriate greeting based on whether we know the name
-            string greetingMessage = GenerateGreetingMessage(userName);
-            
-            LogMessage($"📢 Delivering greeting: '{greetingMessage}'");
-            LogMessage($"📏 Greeting message length: {greetingMessage.Length} characters");
-            LogMessage($"🔤 Greeting message words: {greetingMessage.Split(' ').Length} words");
-            
-            // Use simplified welcome method to avoid word-by-word processing
-            DeliverSimpleWelcome(greetingMessage);
-        }));
-    }
-    
     private IEnumerator DelayedAutoGreetingWithStartupProtection()
     {
         LogMessage("🔄 Waiting for startup protection to expire before greeting...");
@@ -627,12 +617,15 @@ public class MobileRealtimeChat : MonoBehaviour
         }
         
         LogMessage("🤝 Manual greeting triggered");
-        StartCoroutine(DelayedAutoGreeting());
+        StartCoroutine(DelayedAutoGreetingWithStartupProtection());
     }
     
     public void StartVoiceInput()
     {
         LogMessage($"StartVoiceInput called - isConnectionActive: {isConnectionActive}, isTalking: {isTalking}, isAIResponding: {isAIResponding}, isWaitingForOpenAIResponse: {isWaitingForOpenAIResponse}, isInitializing: {isInitializing}, localMicTrack != null: {localMicTrack != null}");
+        
+        // Log detailed connection status for debugging
+        LogConnectionStatus();
         
         if (isInitializing)
         {
@@ -1014,6 +1007,7 @@ public class MobileRealtimeChat : MonoBehaviour
         dataChannel.OnMessage = (byte[] data) =>
         {
             lastResponseTime = Time.time;
+            LogMessage($"📥 Received data channel message: {data.Length} bytes");
             ProcessDataChannelMessage(data);
         };
         
@@ -1181,106 +1175,129 @@ public class MobileRealtimeChat : MonoBehaviour
     {
         try
         {
-            var message = Encoding.UTF8.GetString(data);
-            var jo = JObject.Parse(message);
+            string messageText = System.Text.Encoding.UTF8.GetString(data);
+            LogMessage($"🔍 Processing message: {messageText.Substring(0, Math.Min(200, messageText.Length))}...");
+            
+            var jo = JObject.Parse(messageText);
             var messageType = jo["type"]?.ToString();
             
-            LogMessage($"Received message type: {messageType}");
-            LogMessage($"Message content: {message.Substring(0, Math.Min(200, message.Length))}...");
+            LogMessage($"📋 Message type: {messageType}");
+            
+            // Log the full message structure for debugging
+            if (messageType != null && (messageType.Contains("response") || messageType.Contains("conversation")))
+            {
+                LogMessage($"🔍 Full message structure: {jo.ToString(Formatting.None)}");
+            }
             
             switch (messageType)
             {
-                case "conversation.item.input_audio_transcription.completed":
-                    HandleAudioTranscription(jo);
-                    break;
-                    
-                case "conversation.item.input_audio_transcription.delta":
-                    HandleAudioTranscriptionDelta(jo);
-                    break;
-                    
-                case "response.created":
-                    HandleResponseStart();
-                    break;
-                    
-                case "response.done":
-                    HandleResponseComplete();
-                    break;
-                    
-                case "response.cancelled":
-                    HandleResponseCancelled(jo);
-                    break;
-                    
                 case "response.output_item.added":
                 case "response.content_part.added":
+                    LogMessage("📝 Processing text response...");
                     HandleTextResponse(jo);
                     break;
                     
                 case "response.audio.delta":
+                    LogMessage("🔊 Processing audio delta...");
                     // Handle audio response deltas
                     HandleAudioResponseDelta(jo);
                     break;
                     
                 case "response.audio_transcript.delta":
+                    LogMessage("🎤 Processing audio transcript delta...");
                     // Handle audio transcript deltas (this is what was actually spoken)
                     HandleAudioTranscriptDelta(jo);
                     break;
                     
                 case "response.audio_transcript.done":
+                    LogMessage("✅ Processing audio transcript done...");
                     // Handle completed audio transcript
                     HandleAudioTranscriptDone(jo);
                     break;
                     
                 case "response.output_item.done":
                 case "response.content_part.done":
+                    LogMessage("✅ Content part completed");
                     // Content part completed
-                    LogMessage("Content part completed");
+                    break;
+                    
+                case "response.created":
+                    LogMessage("🚀 Response created - starting AI response");
+                    HandleResponseStart();
+                    break;
+                    
+                case "response.create":
+                    LogMessage("🔊 Processing response creation request");
+                    HandleResponseCreate(jo);
+                    break;
+                    
+                case "response.done":
+                    LogMessage("✅ Response done - completing AI response");
+                    HandleResponseComplete();
+                    break;
+                    
+                case "response.cancelled":
+                    LogMessage("❌ Response cancelled");
+                    HandleResponseCancelled(jo);
                     break;
                     
                 case "response.function_call_arguments.delta":
+                    LogMessage("🔧 Processing function call arguments delta...");
                     HandleFunctionCallArgumentsDelta(jo);
                     break;
                     
                 case "response.function_call_arguments.done":
+                    LogMessage("✅ Function call arguments done...");
                     HandleFunctionCallArgumentsDone(jo);
                     break;
                     
                 case "session.created":
                 case "session.updated":
-                    LogMessage("Session event received");
+                    LogMessage("📋 Session event received");
                     break;
                     
                 case "input_audio_buffer.speech_started":
+                    LogMessage("🎤 Speech started...");
                     HandleSpeechStarted(jo);
                     break;
                     
                 case "input_audio_buffer.speech_stopped":
+                    LogMessage("🔇 Speech stopped...");
                     HandleSpeechStopped(jo);
                     break;
                     
                 case "conversation.item.created":
-                    LogMessage("Conversation item created");
+                    LogMessage("💬 Conversation item created");
+                    break;
+                    
+                case "conversation.item.create":
+                    LogMessage("💬 Processing conversation item creation");
+                    HandleConversationItemCreate(jo);
                     break;
                     
                 case "output_audio_buffer.started":
+                    LogMessage("🔊 Output audio buffer started...");
                     HandleOutputAudioBufferStarted(jo);
                     break;
                     
                 case "output_audio_buffer.stopped":
+                    LogMessage("🔇 Output audio buffer stopped...");
                     HandleOutputAudioBufferStopped(jo);
                     break;
                     
                 case "rate_limits.updated":
+                    LogMessage("⏱️ Rate limits updated");
                     HandleRateLimitsUpdated(jo);
                     break;
                     
                 case "error":
+                    LogMessage("❌ Error message received");
                     HandleErrorMessage(jo);
                     break;
                     
                 default:
-                    LogMessage($"Unhandled message type: {messageType}");
-                    // Still try to extract text from unknown message types
-                    HandleTextResponse(jo);
+                    LogMessage($"❓ Unhandled message type: {messageType}");
+                    // Don't process unknown message types to avoid duplicate processing
                     break;
             }
         }
@@ -1339,92 +1356,78 @@ public class MobileRealtimeChat : MonoBehaviour
     
     private void HandleResponseStart()
     {
+        LogMessage("🚀 Response started - AI is beginning to respond");
         isAIResponding = true;
         
-        // Extract response ID if available to track this specific response
-        var responseId = "resp_" + System.Guid.NewGuid().ToString("N").Substring(0, 8);
-        StartOpenAIResponse(responseId);
-
-        //ai is talking
-        if (animationController != null)
-            animationController.TalkFriendlyOnClick();
-
-        LogMessage($"AI response started - transitioning to Responding state (ID: {responseId})");
-        
-        // Update UI to Responding state initially (shows INTERRUPT button)
+        // Update UI
         if (companionUI != null)
         {
             companionUI.ShowProcessingIndicator(false);
+            companionUI.ShowAudioPlaybackIndicator(true);
             companionUI.UpdateStatusText("AI is responding...");
         }
     }
     
     private void HandleResponseComplete()
     {
-        LogMessage("🎵 RESPONSE.DONE received - AI response COMPLETELY finished");
-        LogMessage($"🎵 Previous isAIResponding state: {isAIResponding}");
-        
+        LogMessage("✅ Response completed - AI finished responding");
         isAIResponding = false;
-        CompleteOpenAIResponse(); // Mark OpenAI response as complete
-        LogMessage("✅ AI response COMPLETELY finished - resetting to idle state");
         
-        // NOW it's safe to reset UI state - the entire response is done
+        // Complete the OpenAI response tracking
+        CompleteOpenAIResponse();
+        
+        // Update UI
         if (companionUI != null)
         {
-            LogMessage("🎵 Turning off audio playback indicator - response is fully complete");
             companionUI.ShowAudioPlaybackIndicator(false);
-            companionUI.ShowProcessingIndicator(false);
             companionUI.UpdateStatusText("Ready - Tap to talk");
-            
-            // Reset the conversation state to Idle so the MIC Talk button works again
-            companionUI.ResetToIdleState();
-        }
-        
-        // Add safety timeout to ensure UI resets even if audio events are missed
-        StartCoroutine(SafetyResetUIAfterDelay(10f));
-        
-        LogMessage("🎵 Audio playback should now be complete and UI reset to idle");
-    }
-    
-    private IEnumerator SafetyResetUIAfterDelay(float delay)
-    {
-        yield return new WaitForSeconds(delay);
-        
-        // Only reset if AI is not currently responding to something new
-        if (!isAIResponding && companionUI != null)
-        {
-            LogMessage("🔧 Safety timeout - ensuring UI is in idle state");
-            companionUI.ShowAudioPlaybackIndicator(false);
-            companionUI.ShowProcessingIndicator(false);
-            companionUI.UpdateStatusText("Ready - Tap to talk");
-            
-            // Reset the conversation state to Idle so the MIC Talk button works again
             companionUI.ResetToIdleState();
         }
     }
     
-    private void HandleAudioResponseDelta(JObject message)
+    private void HandleAudioResponseDelta(JObject jo)
     {
-        // Handle audio response chunks
-        LogMessage("Audio response delta received - AI is speaking");
-        
-        // Update UI to show audio is being received
-        if (companionUI != null && !isAIResponding)
+        try
         {
-            companionUI.ShowProcessingIndicator(false);
-            companionUI.ShowAudioPlaybackIndicator(true);
-            
-            // Transition to PlayingAudio state for interrupt capability
-            companionUI.ShowAudioPlaybackIndicator(true);
-            companionUI.UpdateStatusText("AI is speaking...");
-            isAIResponding = true;
+            var audioData = jo["delta"]?["audio"]?.ToString();
+            if (!string.IsNullOrEmpty(audioData))
+            {
+                LogMessage($"🔊 Received audio delta: {audioData.Length} bytes");
+                
+                // Reset timeout since we're receiving audio content
+                if (isWaitingForOpenAIResponse)
+                {
+                    float elapsed = Time.time - lastResponseStartTime;
+                    LogMessage($"🔄 Audio content received after {elapsed:F1}s - Resetting timeout");
+                    lastResponseStartTime = Time.time; // Reset the timer
+                }
+                
+                // Handle audio response chunks
+                LogMessage("Audio response delta received - AI is speaking");
+                
+                // Update UI to show audio is being received
+                if (companionUI != null && !isAIResponding)
+                {
+                    companionUI.ShowProcessingIndicator(false);
+                    companionUI.ShowAudioPlaybackIndicator(true);
+                    
+                    // Transition to PlayingAudio state for interrupt capability
+                    companionUI.ShowAudioPlaybackIndicator(true);
+                    companionUI.UpdateStatusText("AI is speaking...");
+                    isAIResponding = true;
+                }
+                
+                // Ensure remote audio source is playing
+                if (remoteAudioSource != null && !remoteAudioSource.isPlaying)
+                {
+                    remoteAudioSource.Play();
+                    LogMessage("Started remote audio playback");
+                }
+            }
         }
-        
-        // Ensure remote audio source is playing
-        if (remoteAudioSource != null && !remoteAudioSource.isPlaying)
+        catch (Exception ex)
         {
-            remoteAudioSource.Play();
-            LogMessage("Started remote audio playback");
+            LogError($"Error handling audio response delta: {ex.Message}");
         }
     }
     
@@ -1489,72 +1492,63 @@ public class MobileRealtimeChat : MonoBehaviour
         }
     }
     
-    private void HandleTextResponse(JObject message)
+    private void HandleTextResponse(JObject jo)
     {
-        var text = ExtractTextFromMessage(message);
-        if (!string.IsNullOrEmpty(text))
+        try
         {
-            LogMessage($"Text response: {text.Substring(0, Math.Min(100, text.Length))}...");
-            OnAIResponseReceived?.Invoke(text);
+            // Log the raw message structure for debugging
+            LogMessage($"🔍 Raw text response message: {jo.ToString(Formatting.None)}");
             
-            // Store the text response and display it immediately
-            // For image analysis and other text-based responses, this might be the only response we get
-            StoreAIResponse(text);
-            
-            // Update UI with the text response
-            if (companionUI != null)
+            var content = jo["content"]?.ToString();
+            if (!string.IsNullOrEmpty(content))
             {
-                companionUI.ShowProcessingIndicator(false);
+                LogMessage($"📝 Received text response content: {content.Substring(0, Math.Min(100, content.Length))}...");
                 
-                // If we weren't already responding, start now
-                if (!isAIResponding)
+                // Reset timeout since we're receiving content
+                if (isWaitingForOpenAIResponse)
                 {
-                    isAIResponding = true;
-                    companionUI.ShowAudioPlaybackIndicator(true);
+                    float elapsed = Time.time - lastResponseStartTime;
+                    LogMessage($"🔄 Text content received after {elapsed:F1}s - Resetting timeout");
+                    lastResponseStartTime = Time.time; // Reset the timer
+                }
+                
+                // Process the text response
+                if (companionUI != null)
+                {
+                    companionUI.OnAssistantResponse(content);
                 }
             }
-            
-            // Create chat post using ChatPostPrefab
-            CreateChatPost(ChatPostPrefab.ChatPostType.text, text, false);
+            else
+            {
+                LogWarning("⚠️ Text response received but content is empty or null");
+                
+                // Try alternative field names
+                var alternativeContent = jo["text"]?.ToString() ?? 
+                                       jo["message"]?.ToString() ?? 
+                                       jo["response"]?.ToString() ?? 
+                                       jo["part"]?["text"]?.ToString() ??
+                                       jo["delta"]?["text"]?.ToString();
+                
+                if (!string.IsNullOrEmpty(alternativeContent))
+                {
+                    LogMessage($"✅ Found content in alternative field: {alternativeContent.Substring(0, Math.Min(100, alternativeContent.Length))}...");
+                    
+                    // Process the alternative content
+                    if (companionUI != null)
+                    {
+                        companionUI.OnAssistantResponse(alternativeContent);
+                    }
+                }
+                else
+                {
+                    LogError("❌ No content found in any expected field - response may be malformed");
+                }
+            }
         }
-    }
-    
-    private string ExtractTextFromMessage(JObject message)
-    {
-        LogMessage($"🔍 Extracting text from message: {message.ToString(Formatting.None).Substring(0, Math.Min(500, message.ToString(Formatting.None).Length))}...");
-        
-        // Extract text content from various message types
-        var transcript = message["part"]?["transcript"]?.ToString();
-        if (!string.IsNullOrEmpty(transcript)) 
+        catch (Exception ex)
         {
-            LogMessage($"✅ Found transcript: {transcript}");
-            return transcript;
+            LogError($"Error handling text response: {ex.Message}");
         }
-        
-        var content = message["part"]?["content"]?.ToString();
-        if (!string.IsNullOrEmpty(content)) 
-        {
-            LogMessage($"✅ Found content: {content}");
-            return content;
-        }
-        
-        // Try other possible paths
-        var text = message["text"]?.ToString();
-        if (!string.IsNullOrEmpty(text)) 
-        {
-            LogMessage($"✅ Found text: {text}");
-            return text;
-        }
-        
-        var delta = message["delta"]?.ToString();
-        if (!string.IsNullOrEmpty(delta)) 
-        {
-            LogMessage($"✅ Found delta: {delta}");
-            return delta;
-        }
-        
-        LogMessage("❌ No text found in message");
-        return "";
     }
     
     // RAG Integration (simplified for coroutines)
@@ -2067,20 +2061,21 @@ public class MobileRealtimeChat : MonoBehaviour
         LogMessage("🎵 Audio buffer stopped but UI state remains active for continued playback");
     }
     
-    private void HandleResponseCancelled(JObject message)
+    private void HandleResponseCancelled(JObject jo)
     {
-        LogMessage("AI response was cancelled - ready for user input");
+        LogMessage("❌ Response cancelled - AI response was interrupted");
+        isAIResponding = false;
         
-        // Reset UI state after cancellation
+        // Cancel the OpenAI response tracking
+        CancelOpenAIResponse();
+        
+        // Update UI
         if (companionUI != null)
         {
             companionUI.ShowAudioPlaybackIndicator(false);
-            companionUI.ShowProcessingIndicator(false);
+            companionUI.UpdateStatusText("Response cancelled - Tap to talk");
+            companionUI.ResetToIdleState();
         }
-        
-        // Mark response as no longer active
-        isAIResponding = false;
-        CancelOpenAIResponse(); // Mark OpenAI response as cancelled
     }
     
     private void HandleAudioTranscriptDelta(JObject message)
@@ -3202,34 +3197,65 @@ public class MobileRealtimeChat : MonoBehaviour
         currentOpenAIResponseId = responseId;
         isWaitingForOpenAIResponse = true;
         lastResponseStartTime = Time.time;
-        LogMessage($"🔄 Started OpenAI response tracking: {responseId}");
+        LogMessage($"🚀 OpenAI response started - ID: {responseId}, Time: {Time.time:F1}s");
         
-        // Start timeout coroutine
+        // Start timeout protection
         StartCoroutine(ResponseTimeoutCoroutine());
     }
     
     private void CompleteOpenAIResponse()
     {
-        currentOpenAIResponseId = null;
-        isWaitingForOpenAIResponse = false;
-        LogMessage("✅ OpenAI response completed");
+        if (isWaitingForOpenAIResponse)
+        {
+            float responseDuration = Time.time - lastResponseStartTime;
+            LogMessage($"✅ OpenAI response completed - Duration: {responseDuration:F1}s");
+            isWaitingForOpenAIResponse = false;
+            currentOpenAIResponseId = null;
+        }
     }
     
     private void CancelOpenAIResponse()
     {
-        currentOpenAIResponseId = null;
-        isWaitingForOpenAIResponse = false;
-        LogMessage("❌ OpenAI response canceled");
+        if (isWaitingForOpenAIResponse)
+        {
+            float responseDuration = Time.time - lastResponseStartTime;
+            LogMessage($"❌ OpenAI response cancelled - Duration: {responseDuration:F1}s");
+            isWaitingForOpenAIResponse = false;
+            currentOpenAIResponseId = null;
+        }
     }
     
     private IEnumerator ResponseTimeoutCoroutine()
     {
-        yield return new WaitForSeconds(RESPONSE_TIMEOUT_SECONDS);
+        float startTime = Time.time;
+        float checkInterval = 5f; // Check every 5 seconds
+        
+        while (isWaitingForOpenAIResponse && Time.time - startTime < RESPONSE_TIMEOUT_SECONDS)
+        {
+            yield return new WaitForSeconds(checkInterval);
+            
+            float elapsed = Time.time - startTime;
+            float remaining = RESPONSE_TIMEOUT_SECONDS - elapsed;
+            
+            if (elapsed % 15f < checkInterval) // Log every 15 seconds
+            {
+                LogMessage($"⏱️ OpenAI response in progress - Elapsed: {elapsed:F1}s, Remaining: {remaining:F1}s");
+            }
+        }
         
         if (isWaitingForOpenAIResponse)
         {
-            LogWarning($"⚠️ OpenAI response timeout after {RESPONSE_TIMEOUT_SECONDS} seconds");
+            float totalDuration = Time.time - startTime;
+            LogWarning($"⚠ OpenAI response timeout after {totalDuration:F1} seconds - Response may have been lost");
+            
+            // Force reset the state
             CancelOpenAIResponse();
+            
+            // Reset UI state
+            if (companionUI != null)
+            {
+                companionUI.ResetToIdleState();
+            }
         }
     }
     
@@ -3400,5 +3426,93 @@ public class MobileRealtimeChat : MonoBehaviour
         // Fall back to the configured URL
         LogMessage($"Using configured RAG API URL: {ragApiUrl}");
         return ragApiUrl;
+    }
+    
+    private void HandleConversationItemCreate(JObject jo)
+    {
+        try
+        {
+            LogMessage($"🔍 Processing conversation item create: {jo.ToString(Formatting.None)}");
+            
+            // Extract the message content
+            var item = jo["item"];
+            if (item != null)
+            {
+                var content = item["content"];
+                if (content != null && content.HasValues)
+                {
+                    foreach (var contentItem in content)
+                    {
+                        if (contentItem["type"]?.ToString() == "text")
+                        {
+                            var text = contentItem["text"]?.ToString();
+                            if (!string.IsNullOrEmpty(text))
+                            {
+                                LogMessage($"💬 Conversation item text: {text.Substring(0, Math.Min(100, text.Length))}...");
+                                
+                                // Display the message in chat
+                                DisplayMessageInChat(text, false);
+                                
+                                // Update UI
+                                if (companionUI != null)
+                                {
+                                    companionUI.UpdateStatusText("Message displayed in chat");
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            LogError($"Error handling conversation item create: {ex.Message}");
+        }
+    }
+    
+    private void HandleResponseCreate(JObject jo)
+    {
+        try
+        {
+            LogMessage($"🔍 Processing response create: {jo.ToString(Formatting.None)}");
+            
+            // Extract response details
+            var response = jo["response"];
+            if (response != null)
+            {
+                var modalities = response["modalities"];
+                if (modalities != null)
+                {
+                    LogMessage($"🔊 Response modalities: {modalities.ToString()}");
+                    
+                    // Check if audio is requested
+                    bool hasAudio = false;
+                    foreach (var modality in modalities)
+                    {
+                        if (modality.ToString() == "audio")
+                        {
+                            hasAudio = true;
+                            break;
+                        }
+                    }
+                    
+                    if (hasAudio)
+                    {
+                        LogMessage("🎵 Audio generation requested - waiting for audio content");
+                        
+                        // Update UI to show audio is being generated
+                        if (companionUI != null)
+                        {
+                            companionUI.ShowAudioPlaybackIndicator(true);
+                            companionUI.UpdateStatusText("Generating audio...");
+                        }
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            LogError($"Error handling response create: {ex.Message}");
+        }
     }
 }
