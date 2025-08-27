@@ -16,9 +16,6 @@ from dotenv import load_dotenv
 import psycopg
 import requests
 import hashlib
-import uuid
-from datetime import datetime
-from pathlib import Path
 
 from database import RAGDatabase
 from chunker import DocumentChunker, DocumentProcessor
@@ -66,6 +63,18 @@ user_conversations = {}  # Store recent conversation history for context (legacy
 user_reminders = {}  # Store active reminders {user_id: [reminder_objects]}
 conversation_manager = None  # Will be initialized after database setup
 
+# Initialize FastAPI app
+app = FastAPI(title="RAG Companion Service", version="1.0.0")
+
+# Add CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Configure appropriately for production
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 @app.on_event("startup")
 async def startup_event():
     """Initialize database on startup"""
@@ -108,18 +117,6 @@ async def startup_event():
         print(f"❌ Database initialization failed: {e}")
         print(f"🔄 RAG service started with in-memory fallback mode")
         print(f"💡 To enable vector database: Set DATABASE_URL to a PostgreSQL URL with pgvector extension")
-
-# Initialize FastAPI app
-app = FastAPI(title="RAG Companion Service", version="1.0.0")
-
-# Add CORS middleware
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],  # Configure appropriately for production
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
 
 # Admin interface route
 @app.get("/admin", response_class=HTMLResponse)
