@@ -538,6 +538,29 @@ class RAGDatabase:
         except Exception as e:
             print(f"❌ Error retrieving user multimedia content: {e}")
             return []
+
+    async def delete_multimedia_content(self, content_id: str):
+        """Delete multimedia content from database"""
+        try:
+            async with await psycopg.AsyncConnection.connect(self.db_url) as conn:
+                async with conn.cursor() as cur:
+                    await cur.execute("""
+                        DELETE FROM multimedia_content 
+                        WHERE content_id = %(content_id)s
+                    """, {"content_id": content_id})
+                    
+                    # Also delete related conversation content
+                    await cur.execute("""
+                        DELETE FROM conversation_content 
+                        WHERE multimedia_id = %(content_id)s
+                    """, {"content_id": content_id})
+                    
+                    await conn.commit()
+                    print(f"✅ Deleted multimedia content: {content_id}")
+                    return True
+        except Exception as e:
+            print(f"❌ Error deleting multimedia content: {e}")
+            return False
     
     # NEW: Enhanced conversation content methods
     

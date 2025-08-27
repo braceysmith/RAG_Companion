@@ -61,10 +61,53 @@ public class ReminderManager : MonoBehaviour
     private List<ReminderData> dueReminders = new List<ReminderData>();
     private Coroutine reminderCheckCoroutine;
     
-    void Start()
+    private void Start()
     {
-        // Wait for time sync before starting reminder operations
+        // Wait for TimeSyncManager to be available
         StartCoroutine(InitializeWithTimeSync());
+        
+        // Subscribe to connection events
+        var mobileChat = FindFirstObjectByType<MobileRealtimeChat>();
+        if (mobileChat != null)
+        {
+            // Subscribe to connection events for better timing
+            mobileChat.OnConnectionEstablished += OnConnectionEstablished;
+            mobileChat.OnConnectionLost += OnConnectionLost;
+        }
+    }
+    
+    private void OnDestroy()
+    {
+        // Unsubscribe from connection events
+        var mobileChat = FindFirstObjectByType<MobileRealtimeChat>();
+        if (mobileChat != null)
+        {
+            mobileChat.OnConnectionEstablished -= OnConnectionEstablished;
+            mobileChat.OnConnectionLost -= OnConnectionLost;
+        }
+        
+        // Stop reminder coroutines
+        if (reminderCheckCoroutine != null)
+        {
+            StopCoroutine(reminderCheckCoroutine);
+        }
+    }
+    
+    private void OnConnectionEstablished()
+    {
+        Debug.Log("🔗 WebRTC connection established - checking for pending reminders");
+        
+        // If we have due reminders that haven't been delivered yet, try to deliver them now
+        if (dueReminders.Count > 0)
+        {
+            Debug.Log($"🔔 Connection ready - attempting to deliver {dueReminders.Count} pending reminder(s)");
+            StartCoroutine(DeliverRemindersThroughAI());
+        }
+    }
+    
+    private void OnConnectionLost()
+    {
+        Debug.Log("🔗 WebRTC connection lost - reminder delivery paused");
     }
     
     IEnumerator InitializeWithTimeSync()
@@ -105,13 +148,7 @@ public class ReminderManager : MonoBehaviour
         }
     }
     
-    void OnDestroy()
-    {
-        if (reminderCheckCoroutine != null)
-        {
-            StopCoroutine(reminderCheckCoroutine);
-        }
-    }
+    // Reminder checking methods
     
     IEnumerator CheckRemindersOnStartup()
     {
@@ -452,18 +489,8 @@ public class ReminderManager : MonoBehaviour
                         var mobileChat = FindFirstObjectByType<MobileRealtimeChat>();
                         if (mobileChat != null)
                         {
-                            // Check if the connection is active before attempting AI delivery
-                            if (mobileChat.IsConnected)
-                            {
-                                // Send the AI message as if it's starting a new conversation
-                                mobileChat.TriggerAIReminderDelivery(aiMessage);
-                            }
-                            else
-                            {
-                                Debug.LogWarning("🔔 MobileRealtimeChat connection not active - AI reminder message cannot be delivered audibly");
-                                // Fallback: just log the reminder content
-                                Debug.Log($"📝 Reminder content (no audio): {aiMessage}");
-                            }
+                            // Wait for connection to be ready instead of failing immediately
+                            StartCoroutine(WaitForConnectionAndDeliverReminder(mobileChat, aiMessage));
                         }
                         else
                         {
@@ -489,6 +516,38 @@ public class ReminderManager : MonoBehaviour
             {
                 Debug.LogError($"AI reminder delivery request failed: {request.error}");
             }
+        }
+    }
+    
+    // Wait for WebRTC connection to be ready before delivering reminders
+    private IEnumerator WaitForConnectionAndDeliverReminder(MobileRealtimeChat mobileChat, string aiMessage)
+    {
+        Debug.Log("🔗 Waiting for WebRTC connection to be ready for reminder delivery...");
+        
+        // Wait up to 30 seconds for connection to be established
+        float timeout = 30f;
+        float elapsed = 0f;
+        
+        while (!mobileChat.IsConnected && elapsed < timeout)
+        {
+            yield return new WaitForSeconds(0.5f);
+            elapsed += 0.5f;
+            
+            if (elapsed % 5f < 0.5f) // Log every 5 seconds
+            {
+                Debug.Log($"⏱️ Still waiting for connection... ({elapsed:F1}s / {timeout}s)");
+            }
+        }
+        
+        if (mobileChat.IsConnected)
+        {
+            Debug.Log("✅ WebRTC connection ready - delivering reminder through AI");
+            mobileChat.TriggerAIReminderDelivery(aiMessage);
+        }
+        else
+        {
+            Debug.LogWarning($"⚠️ WebRTC connection timeout after {timeout}s - reminder cannot be delivered audibly");
+            Debug.Log($"📝 Reminder content (no audio): {aiMessage}");
         }
     }
     

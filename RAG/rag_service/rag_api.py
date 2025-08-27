@@ -14,6 +14,11 @@ from pydantic import BaseModel
 from openai import OpenAI
 from dotenv import load_dotenv
 import psycopg
+import requests
+import hashlib
+import uuid
+from datetime import datetime
+from pathlib import Path
 
 from database import RAGDatabase
 from chunker import DocumentChunker, DocumentProcessor
@@ -489,14 +494,19 @@ async def create_realtime_session(request: RealtimeSessionRequest):
 
 @app.post("/generate_image")
 async def generate_image(request: dict):
-    """Generate an image using DALL-E 3"""
+    """Generate an image using DALL-E 3 and store it locally"""
     try:
         prompt = request.get("prompt", "")
         size = request.get("size", "1024x1024")
         user_id = request.get("user_id", "")
+        session_id = request.get("session_id", "")
+        turn_id = request.get("turn_id", "")
         
         if not prompt:
             raise HTTPException(status_code=400, detail="Prompt is required")
+        
+        if not user_id:
+            raise HTTPException(status_code=400, detail="User ID is required")
         
         # Call DALL-E 3 API
         response = client.images.generate(
@@ -509,15 +519,99 @@ async def generate_image(request: dict):
         
         image_url = response.data[0].url
         
-        # Log the image generation
-        print(f"🎨 Generated image for user {user_id}: {prompt}")
-        
-        return {
-            "success": True,
-            "image_url": image_url,
-            "prompt": prompt,
-            "size": size
-        }
+        # Download and save the image locally
+        try:
+            # Create multimedia storage directory if it doesn't exist
+            storage_dir = Path("multimedia/images")
+            storage_dir.mkdir(parents=True, exist_ok=True)
+            
+            # Generate unique content ID
+            content_id = str(uuid.uuid4())
+            
+            # Download image from DALL-E
+            image_response = requests.get(image_url)
+            image_response.raise_for_status()
+            
+            # Determine file extension (DALL-E typically returns PNG)
+            file_extension = ".png"
+            filename = f"{content_id}{file_extension}"
+            file_path = storage_dir / filename
+            
+            # Save image to local storage
+            with open(file_path, "wb") as f:
+                f.write(image_response.content)
+            
+            # Calculate file hash
+            content_hash = hashlib.sha256(image_response.content).hexdigest()
+            
+            # Store in database
+            if database:
+                await database.store_multimedia_content(
+                    content_id=content_id,
+                    user_id=user_id,
+                    content_type="image",
+                    file_path=str(file_path),
+                    file_name=filename,
+                    file_size=len(image_response.content),
+                    mime_type="image/png",
+                    content_hash=content_hash,
+                    session_id=session_id,
+                    turn_id=turn_id,
+                    metadata={
+                        "generation_model": "dall-e-3",
+                        "size": size,
+                        "quality": "standard",
+                        "original_url": image_url
+                    },
+                    is_generated=True,
+                    generation_tool="dall-e-3",
+                    generation_prompt=prompt,
+                    tags=["generated", "ai-art", "dall-e-3"]
+                )
+                
+                # Also store in conversation content for easy retrieval
+                await database.store_conversation_content(
+                    turn_id=turn_id or f"img_{content_id}",
+                    user_id=user_id,
+                    content_type="image",
+                    multimedia_id=content_id,
+                    content_order=0,
+                    is_user_content=False,
+                    mcp_tool_used="dall-e-3",
+                    tool_parameters={
+                        "prompt": prompt,
+                        "size": size,
+                        "model": "dall-e-3"
+                    },
+                    metadata={
+                        "generation_timestamp": datetime.now().isoformat(),
+                        "prompt": prompt
+                    }
+                )
+            
+            print(f"🎨 Generated and stored image for user {user_id}: {prompt}")
+            print(f"📁 Saved to: {file_path}")
+            
+            return {
+                "success": True,
+                "content_id": content_id,
+                "file_path": str(file_path),
+                "prompt": prompt,
+                "size": size,
+                "created_at": datetime.now().isoformat(),
+                "file_size": len(image_response.content)
+            }
+            
+        except Exception as storage_error:
+            print(f"❌ Error storing generated image: {storage_error}")
+            # Still return the temporary URL if storage fails
+            return {
+                "success": True,
+                "image_url": image_url,
+                "prompt": prompt,
+                "size": size,
+                "warning": "Image generated but storage failed - using temporary URL"
+            }
         
     except Exception as e:
         print(f"❌ Image generation error: {str(e)}")
@@ -525,6 +619,123 @@ async def generate_image(request: dict):
             "success": False,
             "error": str(e)
         }
+
+@app.get("/user_images/{user_id}")
+async def get_user_images(user_id: str, limit: int = 50, offset: int = 0, content_type: str = "image"):
+    """Retrieve all images for a specific user"""
+    try:
+        if not database:
+            raise HTTPException(status_code=500, detail="Database not available")
+        
+        # Get user's multimedia content
+        user_content = await database.get_user_multimedia_content(
+            user_id=user_id,
+            content_type=content_type,
+            limit=limit,
+            offset=offset
+        )
+        
+        # Filter for images and format response
+        images = []
+        for content in user_content:
+            if content.get("content_type") == "image":
+                # Check if file exists
+                file_path = Path(content.get("file_path", ""))
+                if file_path.exists():
+                    images.append({
+                        "content_id": content.get("content_id"),
+                        "file_name": content.get("file_name"),
+                        "file_size": content.get("file_size"),
+                        "created_at": content.get("created_at"),
+                        "generation_prompt": content.get("generation_prompt"),
+                        "generation_tool": content.get("generation_tool"),
+                        "metadata": content.get("metadata"),
+                        "tags": content.get("tags", []),
+                        "file_path": str(file_path)
+                    })
+        
+        return {
+            "success": True,
+            "user_id": user_id,
+            "images": images,
+            "total_count": len(images),
+            "limit": limit,
+            "offset": offset
+        }
+        
+    except Exception as e:
+        print(f"❌ Error retrieving user images: {str(e)}")
+        return {
+            "success": False,
+            "error": str(e)
+        }
+
+@app.get("/image/{content_id}")
+async def get_image(content_id: str):
+    """Retrieve a specific image by content ID"""
+    try:
+        if not database:
+            raise HTTPException(status_code=500, detail="Database not available")
+        
+        # Get image metadata from database
+        content = await database.get_multimedia_content(content_id)
+        if not content:
+            raise HTTPException(status_code=404, detail="Image not found")
+        
+        if content.get("content_type") != "image":
+            raise HTTPException(status_code=400, detail="Content is not an image")
+        
+        # Check if file exists
+        file_path = Path(content.get("file_path", ""))
+        if not file_path.exists():
+            raise HTTPException(status_code=404, detail="Image file not found")
+        
+        # Return image file
+        from fastapi.responses import FileResponse
+        return FileResponse(
+            path=str(file_path),
+            media_type=content.get("mime_type", "image/png"),
+            filename=content.get("file_name", f"{content_id}.png")
+        )
+        
+    except Exception as e:
+        print(f"❌ Error retrieving image: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error retrieving image: {str(e)}")
+
+@app.delete("/image/{content_id}")
+async def delete_image(content_id: str, user_id: str):
+    """Delete a specific image (only by the user who created it)"""
+    try:
+        if not database:
+            raise HTTPException(status_code=500, detail="Database not available")
+        
+        # Get image metadata from database
+        content = await database.get_multimedia_content(content_id)
+        if not content:
+            raise HTTPException(status_code=404, detail="Image not found")
+        
+        # Check ownership
+        if content.get("user_id") != user_id:
+            raise HTTPException(status_code=403, detail="Not authorized to delete this image")
+        
+        # Delete from database first
+        await database.delete_multimedia_content(content_id)
+        
+        # Delete file
+        file_path = Path(content.get("file_path", ""))
+        if file_path.exists():
+            file_path.unlink()
+        
+        return {
+            "success": True,
+            "message": f"Image {content_id} deleted successfully"
+        }
+        
+    except Exception as e:
+        print(f"❌ Error deleting image: {str(e)}")
+        return {
+            "success": False,
+            "error": str(e)}
 
 @app.post("/analyze_image")
 async def analyze_image(request: dict):

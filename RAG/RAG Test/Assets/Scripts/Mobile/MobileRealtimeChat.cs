@@ -1183,10 +1183,34 @@ public class MobileRealtimeChat : MonoBehaviour
             
             LogMessage($"📋 Message type: {messageType}");
             
+            // Basic logging for all messages to debug
+            LogMessage($"🔍 BASIC DEBUG - Message type: {messageType}, Length: {messageText.Length}");
+            
             // Log the full message structure for debugging
             if (messageType != null && (messageType.Contains("response") || messageType.Contains("conversation")))
             {
                 LogMessage($"🔍 Full message structure: {jo.ToString(Formatting.None)}");
+            }
+            
+            // Log all response-related messages for debugging
+            if (messageType != null && messageType.Contains("response"))
+            {
+                LogMessage($"🔍 RESPONSE MESSAGE DEBUG - Type: {messageType}");
+                LogMessage($"🔍 Full response message: {jo.ToString(Formatting.Indented)}");
+                
+                // Log all available fields in response messages
+                var allFields = jo.Properties().Select(p => p.Name).ToArray();
+                LogMessage($"🔍 Available fields in response: [{string.Join(", ", allFields)}]");
+                
+                // Log the value of each field for debugging
+                foreach (var field in allFields)
+                {
+                    var value = jo[field];
+                    if (value != null)
+                    {
+                        LogMessage($"🔍 Field '{field}': {value.ToString().Substring(0, Math.Min(100, value.ToString().Length))}...");
+                    }
+                }
             }
             
             switch (messageType)
@@ -1499,6 +1523,9 @@ public class MobileRealtimeChat : MonoBehaviour
             // Log the raw message structure for debugging
             LogMessage($"🔍 Raw text response message: {jo.ToString(Formatting.None)}");
             
+            // Log all top-level keys to see what fields exist
+            LogMessage($"🔑 Top-level keys: [{string.Join(", ", jo.Properties().Select(p => p.Name))}]");
+            
             var content = jo["content"]?.ToString();
             if (!string.IsNullOrEmpty(content))
             {
@@ -1522,32 +1549,86 @@ public class MobileRealtimeChat : MonoBehaviour
             {
                 LogWarning("⚠️ Text response received but content is empty or null");
                 
-                // Try alternative field names
-                var alternativeContent = jo["text"]?.ToString() ?? 
-                                       jo["message"]?.ToString() ?? 
-                                       jo["response"]?.ToString() ?? 
-                                       jo["part"]?["text"]?.ToString() ??
-                                       jo["delta"]?["text"]?.ToString();
+                // Try alternative field names with detailed logging
+                LogMessage("🔍 Searching for content in alternative fields...");
                 
+                var alternativeContent = jo["text"]?.ToString();
                 if (!string.IsNullOrEmpty(alternativeContent))
                 {
-                    LogMessage($"✅ Found content in alternative field: {alternativeContent.Substring(0, Math.Min(100, alternativeContent.Length))}...");
-                    
-                    // Process the alternative content
-                    if (companionUI != null)
+                    LogMessage($"✅ Found content in 'text' field: {alternativeContent.Substring(0, Math.Min(100, alternativeContent.Length))}...");
+                    ProcessAlternativeContent(alternativeContent);
+                    return;
+                }
+                
+                alternativeContent = jo["message"]?.ToString();
+                if (!string.IsNullOrEmpty(alternativeContent))
+                {
+                    LogMessage($"✅ Found content in 'message' field: {alternativeContent.Substring(0, Math.Min(100, alternativeContent.Length))}...");
+                    ProcessAlternativeContent(alternativeContent);
+                    return;
+                }
+                
+                alternativeContent = jo["response"]?.ToString();
+                if (!string.IsNullOrEmpty(alternativeContent))
+                {
+                    LogMessage($"✅ Found content in 'response' field: {alternativeContent.Substring(0, Math.Min(100, alternativeContent.Length))}...");
+                    ProcessAlternativeContent(alternativeContent);
+                    return;
+                }
+                
+                // Check nested fields
+                var part = jo["part"];
+                if (part != null)
+                {
+                    LogMessage($"🔍 Found 'part' object: {part.ToString(Formatting.None)}");
+                    var partText = part["text"]?.ToString();
+                    if (!string.IsNullOrEmpty(partText))
                     {
-                        companionUI.OnAssistantResponse(alternativeContent);
+                        LogMessage($"✅ Found content in 'part.text' field: {partText.Substring(0, Math.Min(100, partText.Length))}...");
+                        ProcessAlternativeContent(partText);
+                        return;
                     }
                 }
-                else
+                
+                var delta = jo["delta"];
+                if (delta != null)
                 {
-                    LogError("❌ No content found in any expected field - response may be malformed");
+                    LogMessage($"🔍 Found 'delta' object: {delta.ToString(Formatting.None)}");
+                    var deltaText = delta["text"]?.ToString();
+                    if (!string.IsNullOrEmpty(deltaText))
+                    {
+                        LogMessage($"✅ Found content in 'delta.text' field: {deltaText.Substring(0, Math.Min(100, deltaText.Length))}...");
+                        ProcessAlternativeContent(deltaText);
+                        return;
+                    }
                 }
+                
+                LogError("❌ No content found in any expected field - response may be malformed");
+                LogMessage($"🔍 Complete message structure for debugging: {jo.ToString(Formatting.Indented)}");
             }
         }
         catch (Exception ex)
         {
             LogError($"Error handling text response: {ex.Message}");
+        }
+    }
+    
+    private void ProcessAlternativeContent(string content)
+    {
+        LogMessage($"🔄 Processing alternative content: {content.Substring(0, Math.Min(100, content.Length))}...");
+        
+        // Reset timeout since we're receiving content
+        if (isWaitingForOpenAIResponse)
+        {
+            float elapsed = Time.time - lastResponseStartTime;
+            LogMessage($"🔄 Content received after {elapsed:F1}s - Resetting timeout");
+            lastResponseStartTime = Time.time; // Reset the timer
+        }
+        
+        // Process the alternative content
+        if (companionUI != null)
+        {
+            companionUI.OnAssistantResponse(content);
         }
     }
     
@@ -2183,7 +2264,9 @@ public class MobileRealtimeChat : MonoBehaviour
         {
             ["prompt"] = prompt,
             ["size"] = size,
-            ["user_id"] = userId
+            ["user_id"] = userId,
+            ["session_id"] = ephemeralKey ?? "default-session",
+            ["turn_id"] = $"img_{DateTime.Now.Ticks}"
         };
         
         string currentRagApiUrl = GetCurrentCloudRAGUrl();
@@ -2201,10 +2284,21 @@ public class MobileRealtimeChat : MonoBehaviour
             {
                 var response = JsonConvert.DeserializeObject<Dictionary<string, object>>(request.downloadHandler.text);
                 
-                if (response.ContainsKey("image_url"))
+                if (response.ContainsKey("content_id"))
                 {
+                    var contentId = response["content_id"].ToString();
+                    LogMessage($"Image generated and stored: {contentId}");
+                    
+                    // Display the stored image using content ID
+                    yield return StartCoroutine(DisplayStoredImage(contentId, prompt));
+                    
+                    SendFunctionCallResult(callId, $"Image generated successfully: {prompt}");
+                }
+                else if (response.ContainsKey("image_url"))
+                {
+                    // Fallback to temporary URL if storage failed
                     var imageUrl = response["image_url"].ToString();
-                    LogMessage($"Image generated: {imageUrl}");
+                    LogMessage($"Image generated (temporary): {imageUrl}");
                     
                     // Download and display the image
                     yield return StartCoroutine(DownloadAndDisplayImage(imageUrl, prompt));
@@ -2287,6 +2381,31 @@ public class MobileRealtimeChat : MonoBehaviour
             {
                 LogError($"Image analysis request failed: {request.error}");
                 SendFunctionCallResult(callId, $"Error analyzing image: {request.error}");
+            }
+        }
+    }
+    
+    private IEnumerator DisplayStoredImage(string contentId, string prompt)
+    {
+        // Load image from RAG storage
+        string imageUrl = $"{GetCurrentCloudRAGUrl()}/image/{contentId}";
+        
+        using (UnityWebRequest request = UnityWebRequestTexture.GetTexture(imageUrl))
+        {
+            yield return request.SendWebRequest();
+            
+            if (request.result == UnityWebRequest.Result.Success) 
+            {
+                Texture2D texture = ((DownloadHandlerTexture)request.downloadHandler).texture;
+                
+                // Display image in UI using ChatPostPrefab
+                CreateChatPost(ChatPostPrefab.ChatPostType.image, prompt, false, texture);
+                
+                LogMessage($"Stored image displayed in chat: {prompt} (ID: {contentId})");
+            }
+            else
+            {
+                LogError($"Failed to load stored image: {request.error}");
             }
         }
     }
