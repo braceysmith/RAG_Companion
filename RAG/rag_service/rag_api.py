@@ -118,6 +118,65 @@ async def startup_event():
         print(f"🔄 RAG service started with in-memory fallback mode")
         print(f"💡 To enable vector database: Set DATABASE_URL to a PostgreSQL URL with pgvector extension")
 
+# Pydantic models
+class TTSRequest(BaseModel):
+    text: str
+    voice: str = "alloy"
+    user_id: Optional[str] = None
+
+class AudioRequest(BaseModel):
+    user_id: str
+    audio_format: str = "webm"
+
+class AudioResponse(BaseModel):
+    transcript: str
+    response_text: str
+    audio_response: Optional[str] = None  # Base64 encoded audio
+    tool_result: Optional[Dict[str, Any]] = None
+    personal_info: Optional[Dict[str, Any]] = None
+
+class RealtimeSessionRequest(BaseModel):
+    user_id: str
+    model: str = "gpt-4o-realtime-preview-2024-10-01"
+    instructions: Optional[str] = None
+
+class MemoryRequest(BaseModel):
+    user_id: str
+    memory_type: str  # 'episodic', 'semantic', 'profile'
+    content: str
+    metadata: Optional[Dict[str, Any]] = None
+
+class MemoryQueryRequest(BaseModel):
+    user_id: str
+    query: str
+    memory_types: Optional[List[str]] = None
+    top_k: int = 3
+
+class MemoryResult(BaseModel):
+    memory_id: str
+    memory_type: str
+    content: str
+    metadata: Dict[str, Any]
+    score: float
+
+class MemoryQueryResponse(BaseModel):
+    results: List[MemoryResult]
+
+class ConversationTurnRequest(BaseModel):
+    turn_id: str
+    session_id: str
+    user_id: str
+    turn_index: int
+    user_message: str
+    assistant_response: str
+    retrieved_chunks: List[str]
+    metadata: Optional[Dict[str, Any]] = None
+
+class IngestionRequest(BaseModel):
+    directory_path: str
+    user_scope: str = "global"
+    safety_level: str = "public"
+
 # Admin interface route
 @app.get("/admin", response_class=HTMLResponse)
 async def admin_interface():
