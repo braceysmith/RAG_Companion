@@ -66,22 +66,184 @@ public class MobileImageManager : MonoBehaviour
     private void Start()
     {
         SetupUI();
+        ValidateComponents();
+        
         if (autoRefreshOnStart)
         {
             LoadUserImages();
         }
     }
     
+    private void ValidateComponents()
+    {
+        Debug.Log("[MobileImageManager] Validating components...");
+        
+        if (imageGalleryContainer == null)
+            Debug.LogError("[MobileImageManager] imageGalleryContainer is null!");
+        else
+            Debug.Log($"[MobileImageManager] imageGalleryContainer: {imageGalleryContainer.name}");
+            
+        if (imageItemPrefab == null)
+            Debug.LogError("[MobileImageManager] imageItemPrefab is null!");
+        else
+            Debug.Log($"[MobileImageManager] imageItemPrefab: {imageItemPrefab.name}");
+            
+        if (galleryScrollRect == null)
+            Debug.LogWarning("[MobileImageManager] galleryScrollRect is null");
+        else
+            Debug.Log($"[MobileImageManager] galleryScrollRect: {galleryScrollRect.name}");
+            
+        if (refreshButton == null)
+            Debug.LogWarning("[MobileImageManager] refreshButton is null");
+        else
+            Debug.Log($"[MobileImageManager] refreshButton: {refreshButton.name}");
+            
+        if (uploadButton == null)
+            Debug.LogWarning("[MobileImageManager] uploadButton is null");
+        else
+            Debug.Log($"[MobileImageManager] uploadButton: {uploadButton.name}");
+            
+        if (statusText == null)
+            Debug.LogWarning("[MobileImageManager] statusText is null");
+        else
+            Debug.Log($"[MobileImageManager] statusText: {statusText.name}");
+            
+        Debug.Log($"[MobileImageManager] RAG API URL: {ragApiUrl}");
+        Debug.Log($"[MobileImageManager] User ID: {userId}");
+    }
+    
+    public void TestConnection()
+    {
+        StartCoroutine(TestConnectionCoroutine());
+    }
+    
+    public void TestRawResponse()
+    {
+        StartCoroutine(TestRawResponseCoroutine());
+    }
+    
+    private IEnumerator TestRawResponseCoroutine()
+    {
+        UpdateStatus("Testing raw response...");
+        Debug.Log("[MobileImageManager] Testing raw server response...");
+        
+        string url = $"{ragApiUrl}/user_images/{userId}?limit=1&content_type=image";
+        
+        using (UnityWebRequest request = UnityWebRequest.Get(url))
+        {
+            request.timeout = 10;
+            request.SetRequestHeader("Content-Type", "application/json");
+            
+            yield return request.SendWebRequest();
+            
+            Debug.Log($"[MobileImageManager] Raw response test - Status: {request.responseCode}, Result: {request.result}");
+            
+            if (request.result == UnityWebRequest.Result.Success)
+            {
+                string responseText = request.downloadHandler.text;
+                Debug.Log($"[MobileImageManager] Raw response text: {responseText}");
+                
+                // Try to parse as JSON to see what we're getting
+                try
+                {
+                    var jsonResponse = JsonConvert.DeserializeObject<Dictionary<string, object>>(responseText);
+                    Debug.Log($"[MobileImageManager] Parsed JSON keys: {string.Join(", ", jsonResponse.Keys)}");
+                    
+                    if (jsonResponse.ContainsKey("success"))
+                    {
+                        Debug.Log($"[MobileImageManager] Success field: {jsonResponse["success"]}");
+                    }
+                    
+                    if (jsonResponse.ContainsKey("images"))
+                    {
+                        var images = jsonResponse["images"];
+                        Debug.Log($"[MobileImageManager] Images field type: {images?.GetType()}, Value: {images}");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Debug.LogError($"[MobileImageManager] JSON parsing failed: {ex.Message}");
+                }
+                
+                UpdateStatus("Raw response test completed - check console");
+            }
+            else
+            {
+                string errorMsg = $"Raw response test failed: {request.error} (HTTP {request.responseCode})";
+                UpdateStatus(errorMsg);
+                Debug.LogError($"[MobileImageManager] {errorMsg}");
+            }
+        }
+    }
+    
+    private IEnumerator TestConnectionCoroutine()
+    {
+        UpdateStatus("Testing connection...");
+        Debug.Log("[MobileImageManager] Testing connection to RAG server...");
+        
+        string testUrl = $"{ragApiUrl}/user_images/{userId}?limit=1&offset=0&content_type=image";
+        
+        using (UnityWebRequest request = UnityWebRequest.Get(testUrl))
+        {
+            request.timeout = 10; // 10 second timeout
+            request.SetRequestHeader("Content-Type", "application/json");
+            
+            yield return request.SendWebRequest();
+            
+            Debug.Log($"[MobileImageManager] Connection test - Response code: {request.responseCode}, Result: {request.result}");
+            
+            if (request.result == UnityWebRequest.Result.Success)
+            {
+                UpdateStatus("Connection successful");
+                Debug.Log("[MobileImageManager] Connection test successful");
+            }
+            else
+            {
+                string errorMsg = $"Connection failed: {request.error} (HTTP {request.responseCode})";
+                UpdateStatus(errorMsg);
+                Debug.LogError($"[MobileImageManager] {errorMsg}");
+                
+                if (request.responseCode == 0)
+                {
+                    Debug.LogError("[MobileImageManager] Response code 0 usually means the server is not reachable or the URL is incorrect");
+                }
+            }
+        }
+    }
+    
     private void SetupUI()
     {
         if (refreshButton != null)
+        {
+            refreshButton.onClick.RemoveAllListeners();
             refreshButton.onClick.AddListener(LoadUserImages);
+            Debug.Log("[MobileImageManager] Refresh button configured");
+        }
+        else
+        {
+            Debug.LogWarning("[MobileImageManager] Refresh button not assigned");
+        }
         
         if (uploadButton != null)
+        {
+            uploadButton.onClick.RemoveAllListeners();
             uploadButton.onClick.AddListener(OpenImageUpload);
+            Debug.Log("[MobileImageManager] Upload button configured");
+        }
+        else
+        {
+            Debug.LogWarning("[MobileImageManager] Upload button not assigned");
+        }
         
         if (statusText != null)
+        {
             statusText.text = "Ready to load images";
+            Debug.Log("[MobileImageManager] Status text configured");
+        }
+        else
+        {
+            Debug.LogWarning("[MobileImageManager] Status text not assigned");
+        }
     }
     
     public void LoadUserImages()
@@ -97,6 +259,7 @@ public class MobileImageManager : MonoBehaviour
         UpdateStatus("Loading images...");
         
         string url = $"{ragApiUrl}/user_images/{userId}?limit={maxImagesToLoad}&offset=0&content_type=image";
+        Debug.Log($"[MobileImageManager] Requesting images from: {url}");
         
         using (UnityWebRequest request = UnityWebRequest.Get(url))
         {
@@ -104,35 +267,62 @@ public class MobileImageManager : MonoBehaviour
             
             yield return request.SendWebRequest();
             
+            Debug.Log($"[MobileImageManager] Response code: {request.responseCode}, Result: {request.result}");
+            
             if (request.result == UnityWebRequest.Result.Success)
             {
                 try
                 {
-                    var response = JsonConvert.DeserializeObject<UserImagesResponse>(request.downloadHandler.text);
+                    string responseText = request.downloadHandler.text;
+                    Debug.Log($"[MobileImageManager] Response text: {responseText}");
+                    
+                    var response = JsonConvert.DeserializeObject<UserImagesResponse>(responseText);
                     
                     if (response.success)
                     {
-                        userImages = response.images;
+                        userImages = response.images ?? new List<StoredImage>();
                         UpdateStatus($"Loaded {userImages.Count} images");
-                        DisplayImages();
-                        OnImagesLoaded?.Invoke(userImages);
+                        Debug.Log($"[MobileImageManager] Successfully loaded {userImages.Count} images");
+                        
+                        if (userImages.Count > 0)
+                        {
+                            DisplayImages();
+                            OnImagesLoaded?.Invoke(userImages);
+                        }
+                        else
+                        {
+                            UpdateStatus("No images found for this user");
+                            Debug.Log("[MobileImageManager] No images found in response");
+                        }
                     }
                     else
                     {
-                        UpdateStatus("Failed to load images");
-                        OnError?.Invoke("Failed to load images from server");
+                        string errorMsg = "Failed to load images from server";
+                        if (response != null && response.images != null)
+                        {
+                            errorMsg = $"Server returned success=false with {response.images.Count} images";
+                        }
+                        UpdateStatus(errorMsg);
+                        OnError?.Invoke(errorMsg);
+                        Debug.LogError($"[MobileImageManager] {errorMsg}");
+                        
+                        // Log the full response for debugging
+                        Debug.LogError($"[MobileImageManager] Full server response: {JsonConvert.SerializeObject(response, Formatting.Indented)}");
                     }
                 }
                 catch (Exception ex)
                 {
                     UpdateStatus($"Error parsing response: {ex.Message}");
                     OnError?.Invoke($"Error parsing response: {ex.Message}");
+                    Debug.LogError($"[MobileImageManager] JSON parsing error: {ex.Message}\nResponse: {request.downloadHandler.text}");
                 }
             }
             else
             {
-                UpdateStatus($"Error loading images: {request.error}");
-                OnError?.Invoke($"Error loading images: {request.error}");
+                string errorMsg = $"Error loading images: {request.error} (HTTP {request.responseCode})";
+                UpdateStatus(errorMsg);
+                OnError?.Invoke(errorMsg);
+                Debug.LogError($"[MobileImageManager] {errorMsg}");
             }
         }
         
@@ -184,37 +374,62 @@ public class MobileImageManager : MonoBehaviour
         if (imageCache.ContainsKey(image.content_id))
         {
             // Use cached image
-            imageComponent.sprite = Sprite.Create(imageCache[image.content_id], 
-                new Rect(0, 0, imageCache[image.content_id].width, imageCache[image.content_id].height), 
-                Vector2.one * 0.5f);
+            if (imageComponent != null)
+            {
+                imageComponent.sprite = Sprite.Create(imageCache[image.content_id], 
+                    new Rect(0, 0, imageCache[image.content_id].width, imageCache[image.content_id].height), 
+                    Vector2.one * 0.5f);
+                Debug.Log($"[MobileImageManager] Using cached image for {image.content_id}");
+            }
             yield break;
         }
         
         // Load image from RAG server
         string imageUrl = $"{ragApiUrl}/image/{image.content_id}";
+        Debug.Log($"[MobileImageManager] Loading image from: {imageUrl}");
         
         using (UnityWebRequest request = UnityWebRequestTexture.GetTexture(imageUrl))
         {
             yield return request.SendWebRequest();
             
+            Debug.Log($"[MobileImageManager] Image load result: {request.result}, Response code: {request.responseCode}");
+            
             if (request.result == UnityWebRequest.Result.Success)
             {
                 Texture2D texture = ((DownloadHandlerTexture)request.downloadHandler).texture;
                 
-                // Cache the texture
-                imageCache[image.content_id] = texture;
-                
-                // Create sprite and assign to image component
-                if (imageComponent != null)
+                if (texture != null)
                 {
-                    imageComponent.sprite = Sprite.Create(texture, 
-                        new Rect(0, 0, texture.width, texture.height), 
-                        Vector2.one * 0.5f);
+                    // Cache the texture
+                    imageCache[image.content_id] = texture;
+                    
+                    // Create sprite and assign to image component
+                    if (imageComponent != null)
+                    {
+                        imageComponent.sprite = Sprite.Create(texture, 
+                            new Rect(0, 0, texture.width, texture.height), 
+                            Vector2.one * 0.5f);
+                        Debug.Log($"[MobileImageManager] Successfully loaded image {image.content_id}: {texture.width}x{texture.height}");
+                    }
+                    else
+                    {
+                        Debug.LogWarning($"[MobileImageManager] Image component is null for {image.content_id}");
+                    }
+                }
+                else
+                {
+                    Debug.LogError($"[MobileImageManager] Texture is null for {image.content_id}");
                 }
             }
             else
             {
-                Debug.LogError($"Failed to load image {image.content_id}: {request.error}");
+                Debug.LogError($"[MobileImageManager] Failed to load image {image.content_id}: {request.error} (HTTP {request.responseCode})");
+                
+                // Try to get more error details
+                if (request.downloadHandler != null && !string.IsNullOrEmpty(request.downloadHandler.text))
+                {
+                    Debug.LogError($"[MobileImageManager] Error response: {request.downloadHandler.text}");
+                }
             }
         }
     }

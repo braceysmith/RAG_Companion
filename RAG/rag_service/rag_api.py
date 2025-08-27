@@ -32,8 +32,82 @@ from conversation_manager import ConversationManager
 # Load environment variables
 load_dotenv()
 
+# Initialize database with better error handling
+database_url = os.getenv("DATABASE_URL", "postgresql://user:password@localhost/rag_db")
+db = None
+database_available = False
+
+try:
+    db = RAGDatabase(database_url)
+    # Test database connection
+    print("🔌 Testing database connection...")
+    # You can add a simple test query here if needed
+    database_available = True
+    print("✅ Database connection established successfully")
+except Exception as e:
+    print(f"❌ Failed to initialize database: {e}")
+    database_available = False
+    db = None
+
+# Initialize needs framework and database
+needs_db = NeedsDatabase(database_url)
+
+# Initialize chunker and processor
+chunker = DocumentChunker()
+processor = DocumentProcessor(chunker)
+
 # Initialize OpenAI client
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
+# Global state
+embedding_cache = {}
+user_profiles = {}  # Simple in-memory storage for personal info
+user_conversations = {}  # Store recent conversation history for context (legacy)
+user_reminders = {}  # Store active reminders {user_id: [reminder_objects]}
+conversation_manager = None  # Will be initialized after database setup
+
+@app.on_event("startup")
+async def startup_event():
+    """Initialize database on startup"""
+    global database_available, conversation_manager
+    try:
+        if db:
+            await db.initialize()
+            
+            # Initialize needs database tables
+            try:
+                print("🔍 Initializing needs database tables...")
+                needs_initialized = await needs_db.initialize_needs_tables()
+                if needs_initialized:
+                    print("✅ Needs database tables initialized successfully")
+                else:
+                    print("⚠️  Needs database tables initialization failed")
+            except Exception as needs_error:
+                print(f"❌ Needs database initialization error: {needs_error}")
+            
+            database_available = True
+            
+            # Initialize conversation manager
+            try:
+                print("🔍 Attempting to initialize conversation manager...")
+                conversation_manager = ConversationManager(db)
+                print("✅ Conversation manager initialized with database persistence")
+            except Exception as cm_error:
+                conversation_manager = None
+                print(f"⚠️  Conversation manager initialization failed: {cm_error}")
+                print("🔄 RAG service will use fallback conversation storage")
+            
+            print("✅ RAG service started successfully with PostgreSQL + pgvector")
+            print(f"📊 Database URL: {database_url[:50]}...")
+        else:
+            print("⚠️  Database not initialized - service will run in fallback mode")
+            database_available = False
+    except Exception as e:
+        database_available = False
+        conversation_manager = None
+        print(f"❌ Database initialization failed: {e}")
+        print(f"🔄 RAG service started with in-memory fallback mode")
+        print(f"💡 To enable vector database: Set DATABASE_URL to a PostgreSQL URL with pgvector extension")
 
 # Initialize FastAPI app
 app = FastAPI(title="RAG Companion Service", version="1.0.0")
@@ -57,194 +131,28 @@ async def admin_interface():
     except FileNotFoundError:
         return HTMLResponse(content="<h1>Admin interface not found</h1>", status_code=404)
 
-# Initialize database with better error handling
-database_url = os.getenv("DATABASE_URL", "postgresql://user:password@localhost/rag_db")
-db = RAGDatabase(database_url)
-
-# Initialize needs framework and database
-needs_db = NeedsDatabase(database_url)
-
-# Global variable to track database status
-database_available = False
-
-# Initialize chunker and processor
-chunker = DocumentChunker()
-processor = DocumentProcessor(chunker)
-
-# Pydantic models
-class RAGFilters(BaseModel):
-    user_scope: Optional[List[str]] = ["global"]
-    safety_level: Optional[List[str]] = ["public"]
-
-class RAGQueryRequest(BaseModel):
-    query: str
-    user_id: Optional[str] = None
-    top_k: int = 5
-    filters: Optional[RAGFilters] = RAGFilters()
-
-class RAGResult(BaseModel):
-    chunk_id: str
-    text: str
-    doc_title: str
-    section: Optional[str] = None
-    tags: List[str]
-    source_path: str
-    score: float
-
-class RAGQueryResponse(BaseModel):
-    results: List[RAGResult]
-    query_embedding_ms: Optional[float] = None
-    db_lookup_ms: Optional[float] = None
-
-class MemoryRequest(BaseModel):
-    user_id: str
-    memory_type: str  # 'episodic', 'semantic', 'profile'
-    content: str
-    metadata: Optional[Dict[str, Any]] = None
-
-class MemoryQueryRequest(BaseModel):
-    user_id: str
-    query: str
-    memory_types: Optional[List[str]] = None
-    top_k: int = 3
-
-class RealtimeSessionRequest(BaseModel):
-    user_id: str
-    model: str = "gpt-4o-realtime-preview-2024-10-01"
-    instructions: Optional[str] = None
-
-class MemoryResult(BaseModel):
-    memory_id: str
-    memory_type: str
-    content: str
-    metadata: Dict[str, Any]
-    score: float
-
-class MemoryQueryResponse(BaseModel):
-    results: List[MemoryResult]
-
-class ConversationTurnRequest(BaseModel):
-    turn_id: str
-    session_id: str
-    user_id: str
-    turn_index: int
-    user_message: str
-    assistant_response: str
-    retrieved_chunks: List[str]
-    metadata: Optional[Dict[str, Any]] = None
-
-class IngestionRequest(BaseModel):
-    directory_path: str
-    user_scope: str = "global"
-    safety_level: str = "public"
-
-class AudioRequest(BaseModel):
-    user_id: str
-    audio_format: str = "webm"
-
-class AudioResponse(BaseModel):
-    transcript: str
-    response_text: str
-    audio_response: Optional[str] = None  # Base64 encoded audio
-    tool_result: Optional[Dict[str, Any]] = None
-    personal_info: Optional[Dict[str, Any]] = None
-
-class TTSRequest(BaseModel):
-    text: str
-    voice: str = "alloy"
-    user_id: Optional[str] = None
-
-# Global state
-embedding_cache = {}
-user_profiles = {}  # Simple in-memory storage for personal info
-user_conversations = {}  # Store recent conversation history for context (legacy)
-user_reminders = {}  # Store active reminders {user_id: [reminder_objects]}
-conversation_manager = None  # Will be initialized after database setup
-
-@app.on_event("startup")
-async def startup_event():
-    """Initialize database on startup"""
-    global database_available, conversation_manager
-    try:
-        await db.initialize()
-        
-        # Initialize needs database tables
-        try:
-            print("🔍 Initializing needs database tables...")
-            needs_initialized = await needs_db.initialize_needs_tables()
-            if needs_initialized:
-                print("✅ Needs database tables initialized successfully")
-            else:
-                print("⚠️  Needs database tables initialization failed")
-        except Exception as needs_error:
-            print(f"❌ Needs database initialization error: {needs_error}")
-        
-        database_available = True
-        
-        # Initialize conversation manager
-        try:
-            print("🔍 Attempting to initialize conversation manager...")
-            conversation_manager = ConversationManager(db)
-            print("✅ Conversation manager initialized with database persistence")
-        except Exception as cm_error:
-            conversation_manager = None
-            print(f"⚠️  Conversation manager initialization failed: {cm_error}")
-            print(f"Error type: {type(cm_error).__name__}")
-            print(f"Error details: {str(cm_error)}")
-            print("🔄 RAG service will use fallback conversation storage")
-            
-            # Try to get more details about the error
-            import traceback
-            traceback.print_exc()
-        
-        print("✅ RAG service started successfully with PostgreSQL + pgvector")
-        print(f"📊 Database URL: {database_url[:50]}...")
-    except Exception as e:
-        database_available = False
-        conversation_manager = None
-        print(f"❌ Database initialization failed: {e}")
-        print(f"🔄 RAG service started with in-memory fallback mode")
-        print(f"💡 To enable vector database: Set DATABASE_URL to a PostgreSQL URL with pgvector extension")
-
 @app.get("/health")
 async def health_check():
-    """Health check endpoint"""
+    """Health check endpoint to verify database connectivity"""
     try:
-        # Get user count from database if available
-        stored_users = 0
-        active_reminders = 0
-        
-        if database_available and needs_db:
-            try:
-                # Get user count from profiles table
-                stored_users = await needs_db.get_user_count()
-            except:
-                stored_users = 0
-            
-            try:
-                # Get active reminders count
-                active_reminders = await needs_db.get_active_reminders_count()
-            except:
-                active_reminders = 0
-        
-        return {
-            "status": "healthy", 
-            "service": "RAG Companion Service",
-            "database_available": database_available,
-            "vector_search": "postgresql_pgvector" if database_available else "fallback_mode",
-            "conversation_manager": "active" if conversation_manager else "inactive",
-            "stored_users": stored_users,
-            "active_reminders": active_reminders
-        }
+        if db and database_available:
+            return {
+                "status": "healthy",
+                "database": "connected",
+                "timestamp": datetime.now().isoformat()
+            }
+        else:
+            return {
+                "status": "unhealthy",
+                "database": "disconnected",
+                "timestamp": datetime.now().isoformat(),
+                "error": "Database not available"
+            }
     except Exception as e:
         return {
-            "status": "healthy", 
-            "service": "RAG Companion Service",
-            "database_available": database_available,
-            "vector_search": "postgresql_pgvector" if database_available else "fallback_mode",
-            "conversation_manager": "active" if conversation_manager else "inactive",
-            "stored_users": 0,
-            "active_reminders": 0,
+            "status": "error",
+            "database": "error",
+            "timestamp": datetime.now().isoformat(),
             "error": str(e)
         }
 
@@ -545,8 +453,8 @@ async def generate_image(request: dict):
             content_hash = hashlib.sha256(image_response.content).hexdigest()
             
             # Store in database
-            if database:
-                await database.store_multimedia_content(
+            if db:
+                await db.store_multimedia_content(
                     content_id=content_id,
                     user_id=user_id,
                     content_type="image",
@@ -570,7 +478,7 @@ async def generate_image(request: dict):
                 )
                 
                 # Also store in conversation content for easy retrieval
-                await database.store_conversation_content(
+                await db.store_conversation_content(
                     turn_id=turn_id or f"img_{content_id}",
                     user_id=user_id,
                     content_type="image",
@@ -624,11 +532,11 @@ async def generate_image(request: dict):
 async def get_user_images(user_id: str, limit: int = 50, offset: int = 0, content_type: str = "image"):
     """Retrieve all images for a specific user"""
     try:
-        if not database:
+        if not db:
             raise HTTPException(status_code=500, detail="Database not available")
         
         # Get user's multimedia content
-        user_content = await database.get_user_multimedia_content(
+        user_content = await db.get_user_multimedia_content(
             user_id=user_id,
             content_type=content_type,
             limit=limit,
@@ -674,11 +582,11 @@ async def get_user_images(user_id: str, limit: int = 50, offset: int = 0, conten
 async def get_image(content_id: str):
     """Retrieve a specific image by content ID"""
     try:
-        if not database:
+        if not db:
             raise HTTPException(status_code=500, detail="Database not available")
         
         # Get image metadata from database
-        content = await database.get_multimedia_content(content_id)
+        content = await db.get_multimedia_content(content_id)
         if not content:
             raise HTTPException(status_code=404, detail="Image not found")
         
@@ -704,13 +612,13 @@ async def get_image(content_id: str):
 
 @app.delete("/image/{content_id}")
 async def delete_image(content_id: str, user_id: str):
-    """Delete a specific image (only by the user who created it)"""
+    """Delete a specific image (only by the user ID who created it)"""
     try:
-        if not database:
+        if not db:
             raise HTTPException(status_code=500, detail="Database not available")
         
         # Get image metadata from database
-        content = await database.get_multimedia_content(content_id)
+        content = await db.get_multimedia_content(content_id)
         if not content:
             raise HTTPException(status_code=404, detail="Image not found")
         
@@ -719,7 +627,7 @@ async def delete_image(content_id: str, user_id: str):
             raise HTTPException(status_code=403, detail="Not authorized to delete this image")
         
         # Delete from database first
-        await database.delete_multimedia_content(content_id)
+        await db.delete_multimedia_content(content_id)
         
         # Delete file
         file_path = Path(content.get("file_path", ""))
