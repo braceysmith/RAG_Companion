@@ -448,7 +448,7 @@ class RAGDatabase:
                         "is_generated": is_generated,
                         "generation_tool": generation_tool,
                         "generation_prompt": generation_prompt,
-                        "tags": json.dumps(tags or [])
+                        "tags": tags or []
                     })
                     await conn.commit()
                     print(f"✅ Stored multimedia content: {content_id}")

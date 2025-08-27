@@ -535,6 +535,7 @@ async def generate_image(request: dict):
                 
                 # Also store in conversation content for easy retrieval
                 await db.store_conversation_content(
+                    content_id=f"conv_{content_id}",
                     turn_id=turn_id or f"img_{content_id}",
                     user_id=user_id,
                     content_type="image",
