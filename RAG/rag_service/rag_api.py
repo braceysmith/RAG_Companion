@@ -533,26 +533,31 @@ async def generate_image(request: dict):
                     tags=["generated", "ai-art", "dall-e-3"]
                 )
                 
-                # Also store in conversation content for easy retrieval
-                await db.store_conversation_content(
-                    content_id=f"conv_{content_id}",
-                    turn_id=turn_id or f"img_{content_id}",
-                    user_id=user_id,
-                    content_type="image",
-                    multimedia_id=content_id,
-                    content_order=0,
-                    is_user_content=False,
-                    mcp_tool_used="dall-e-3",
-                    tool_parameters={
-                        "prompt": prompt,
-                        "size": size,
-                        "model": "dall-e-3"
-                    },
-                    metadata={
-                        "generation_timestamp": datetime.now().isoformat(),
-                        "prompt": prompt
-                    }
-                )
+                # Only store in conversation content if we have a valid turn_id
+                if turn_id and turn_id.startswith("turn_"):
+                    try:
+                        await db.store_conversation_content(
+                            content_id=f"conv_{content_id}",
+                            turn_id=turn_id,
+                            user_id=user_id,
+                            content_type="image",
+                            multimedia_id=content_id,
+                            content_order=0,
+                            is_user_content=False,
+                            mcp_tool_used="dall-e-3",
+                            tool_parameters={
+                                "prompt": prompt,
+                                "size": size,
+                                "model": "dall-e-3"
+                            },
+                            metadata={
+                                "generation_timestamp": datetime.now().isoformat(),
+                                "prompt": prompt
+                            }
+                        )
+                    except Exception as conv_error:
+                        print(f"⚠️ Warning: Could not store conversation content: {conv_error}")
+                        # Continue with image storage even if conversation content fails
             
             print(f"🎨 Generated and stored image for user {user_id}: {prompt}")
             print(f"📁 Saved to: {file_path}")

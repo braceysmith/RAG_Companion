@@ -113,8 +113,8 @@ class RAGDatabase:
                         generation_tool TEXT, -- Which MCP tool created this
                         generation_prompt TEXT, -- The prompt that generated this content
                         tags TEXT[],
-                        FOREIGN KEY (session_id) REFERENCES conversation_sessions(session_id),
-                        FOREIGN KEY (turn_id) REFERENCES conversation_turns(turn_id)
+                        FOREIGN KEY (session_id) REFERENCES conversation_sessions(session_id) ON DELETE SET NULL,
+                        FOREIGN KEY (turn_id) REFERENCES conversation_turns(turn_id) ON DELETE SET NULL
                     )
                 """)
                 
@@ -133,8 +133,8 @@ class RAGDatabase:
                         tool_parameters JSONB, -- Parameters used by the MCP tool
                         created_at TIMESTAMPTZ DEFAULT NOW(),
                         metadata JSONB,
-                        FOREIGN KEY (turn_id) REFERENCES conversation_turns(turn_id),
-                        FOREIGN KEY (multimedia_id) REFERENCES multimedia_content(content_id)
+                        FOREIGN KEY (turn_id) REFERENCES conversation_turns(turn_id) ON DELETE CASCADE,
+                        FOREIGN KEY (multimedia_id) REFERENCES multimedia_content(content_id) ON DELETE CASCADE
                     )
                 """)
                 
@@ -153,8 +153,8 @@ class RAGDatabase:
                         error_message TEXT,
                         created_at TIMESTAMPTZ DEFAULT NOW(),
                         metadata JSONB,
-                        FOREIGN KEY (session_id) REFERENCES conversation_sessions(session_id),
-                        FOREIGN KEY (turn_id) REFERENCES conversation_turns(turn_id)
+                        FOREIGN KEY (session_id) REFERENCES conversation_sessions(session_id) ON DELETE SET NULL,
+                        FOREIGN KEY (turn_id) REFERENCES conversation_turns(turn_id) ON DELETE SET NULL
                     )
                 """)
                 
