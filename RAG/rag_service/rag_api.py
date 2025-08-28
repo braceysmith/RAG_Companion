@@ -212,6 +212,119 @@ async def health_check():
             "error": str(e)
         }
 
+@app.post("/fix-database-schema")
+async def fix_database_schema():
+    """Fix the database schema by recreating tables with proper foreign key constraints"""
+    try:
+        if not db:
+            raise HTTPException(status_code=500, detail="Database not available")
+        
+        print("🔧 Fixing database schema...")
+        
+        async with await psycopg.AsyncConnection.connect(db.db_url) as conn:
+            async with conn.cursor() as cur:
+                print("🗑️ Dropping existing problematic tables...")
+                
+                # Drop tables in reverse dependency order
+                await cur.execute("DROP TABLE IF EXISTS conversation_content CASCADE")
+                await cur.execute("DROP TABLE IF EXISTS mcp_tool_executions CASCADE")
+                await cur.execute("DROP TABLE IF EXISTS multimedia_content CASCADE")
+                
+                print("🏗️ Recreating multimedia_content table with proper constraints...")
+                await cur.execute("""
+                    CREATE TABLE multimedia_content (
+                        content_id TEXT PRIMARY KEY,
+                        user_id TEXT NOT NULL,
+                        session_id TEXT,
+                        turn_id TEXT,
+                        content_type TEXT NOT NULL,
+                        file_path TEXT NOT NULL,
+                        file_name TEXT NOT NULL,
+                        file_size BIGINT,
+                        mime_type TEXT,
+                        content_hash TEXT,
+                        metadata JSONB,
+                        created_at TIMESTAMPTZ DEFAULT NOW(),
+                        created_by TEXT DEFAULT 'mcp_tool',
+                        is_generated BOOLEAN DEFAULT FALSE,
+                        generation_tool TEXT,
+                        generation_prompt TEXT,
+                        tags TEXT[],
+                        FOREIGN KEY (session_id) REFERENCES conversation_sessions(session_id) ON DELETE SET NULL,
+                        FOREIGN KEY (turn_id) REFERENCES conversation_turns(turn_id) ON DELETE SET NULL
+                    )
+                """)
+                
+                print("🏗️ Recreating conversation_content table with proper constraints...")
+                await cur.execute("""
+                    CREATE TABLE conversation_content (
+                        content_id TEXT PRIMARY KEY,
+                        turn_id TEXT NOT NULL,
+                        user_id TEXT NOT NULL,
+                        content_type TEXT NOT NULL,
+                        content_data TEXT,
+                        multimedia_id TEXT,
+                        content_order INTEGER,
+                        is_user_content BOOLEAN,
+                        mcp_tool_used TEXT,
+                        tool_parameters JSONB,
+                        created_at TIMESTAMPTZ DEFAULT NOW(),
+                        metadata JSONB,
+                        FOREIGN KEY (turn_id) REFERENCES conversation_turns(turn_id) ON DELETE CASCADE,
+                        FOREIGN KEY (multimedia_id) REFERENCES multimedia_content(content_id) ON DELETE CASCADE
+                    )
+                """)
+                
+                print("🏗️ Recreating mcp_tool_executions table with proper constraints...")
+                await cur.execute("""
+                    CREATE TABLE mcp_tool_executions (
+                        execution_id TEXT PRIMARY KEY,
+                        user_id TEXT NOT NULL,
+                        session_id TEXT,
+                        turn_id TEXT,
+                        tool_name TEXT NOT NULL,
+                        tool_parameters JSONB,
+                        execution_result JSONB,
+                        execution_time_ms INTEGER,
+                        success BOOLEAN,
+                        error_message TEXT,
+                        created_at TIMESTAMPTZ DEFAULT NOW(),
+                        metadata JSONB,
+                        FOREIGN KEY (session_id) REFERENCES conversation_sessions(session_id) ON DELETE SET NULL,
+                        FOREIGN KEY (turn_id) REFERENCES conversation_turns(turn_id) ON DELETE SET NULL
+                    )
+                """)
+                
+                print("🔍 Recreating indexes...")
+                await cur.execute("""
+                    CREATE INDEX multimedia_content_user_idx ON multimedia_content(user_id)
+                """)
+                await cur.execute("""
+                    CREATE INDEX multimedia_content_session_idx ON multimedia_content(session_id)
+                """)
+                await cur.execute("""
+                    CREATE INDEX multimedia_content_type_idx ON multimedia_content(content_type)
+                """)
+                await cur.execute("""
+                    CREATE INDEX conversation_content_turn_idx ON conversation_content(turn_id)
+                """)
+                await cur.execute("""
+                    CREATE INDEX mcp_tool_executions_user_idx ON mcp_tool_executions(user_id)
+                """)
+                
+                await conn.commit()
+                print("✅ Database schema fixed successfully!")
+                
+                return {
+                    "success": True,
+                    "message": "Database schema fixed successfully",
+                    "timestamp": datetime.now().isoformat()
+                }
+                
+    except Exception as e:
+        print(f"❌ Error fixing database schema: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to fix database schema: {str(e)}")
+
 @app.post("/test")
 def test_endpoint(request: dict):
     """Simple test endpoint - synchronous"""
