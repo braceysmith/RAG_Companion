@@ -2284,24 +2284,33 @@ public class MobileRealtimeChat : MonoBehaviour
             {
                 var response = JsonConvert.DeserializeObject<Dictionary<string, object>>(request.downloadHandler.text);
                 
-                if (response.ContainsKey("content_id"))
+                if (response.ContainsKey("image_url"))
                 {
-                    var contentId = response["content_id"].ToString();
-                    LogMessage($"Image generated and stored: {contentId}");
+                    // Use immediate image access for instant display
+                    var imageUrl = response["image_url"].ToString();
+                    var contentId = response.ContainsKey("content_id") ? response["content_id"].ToString() : "";
+                    var storageType = response.ContainsKey("immediate_access") ? response["immediate_access"].ToString() : "unknown";
                     
-                    // Display the stored image using content ID
-                    yield return StartCoroutine(DisplayStoredImage(contentId, prompt));
+                    LogMessage($"Image generated with {storageType} access: {imageUrl}");
+                    
+                    // Display the image immediately using the provided URL
+                    yield return StartCoroutine(DownloadAndDisplayImage(imageUrl, prompt));
+                    
+                    // If we have a content ID, also store it for future reference
+                    if (!string.IsNullOrEmpty(contentId))
+                    {
+                        LogMessage($"Image stored with ID: {contentId}");
+                    }
                     
                     SendFunctionCallResult(callId, $"Image generated successfully: {prompt}");
                 }
-                else if (response.ContainsKey("image_url"))
+                else if (response.ContainsKey("content_id"))
                 {
-                    // Fallback to temporary URL if storage failed
-                    var imageUrl = response["image_url"].ToString();
-                    LogMessage($"Image generated (temporary): {imageUrl}");
+                    // Fallback: try to display stored image
+                    var contentId = response["content_id"].ToString();
+                    LogMessage($"Image generated and stored (fallback): {contentId}");
                     
-                    // Download and display the image
-                    yield return StartCoroutine(DownloadAndDisplayImage(imageUrl, prompt));
+                    yield return StartCoroutine(DisplayStoredImage(contentId, prompt));
                     
                     SendFunctionCallResult(callId, $"Image generated successfully: {prompt}");
                 }

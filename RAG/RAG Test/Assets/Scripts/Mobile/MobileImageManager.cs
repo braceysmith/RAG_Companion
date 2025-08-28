@@ -20,6 +20,11 @@ public class StoredImage
     public Dictionary<string, object> metadata;
     public List<string> tags;
     public string file_path;
+    
+    // New fields for better image access
+    public string cloud_url;
+    public string access_method;
+    public string access_url;
 }
 
 [System.Serializable]
@@ -384,8 +389,35 @@ public class MobileImageManager : MonoBehaviour
             yield break;
         }
         
-        // Load image from RAG server
-        string imageUrl = $"{ragApiUrl}/image/{image.content_id}";
+        // Determine the best way to load the image
+        string imageUrl = null;
+        
+        if (!string.IsNullOrEmpty(image.access_url))
+        {
+            // Use the recommended access method
+            if (image.access_method == "cloud" && !string.IsNullOrEmpty(image.cloud_url))
+            {
+                imageUrl = image.cloud_url;
+                Debug.Log($"[MobileImageManager] Using cloud URL for {image.content_id}: {imageUrl}");
+            }
+            else if (image.access_method == "local")
+            {
+                imageUrl = $"{ragApiUrl}{image.access_url}";
+                Debug.Log($"[MobileImageManager] Using local server for {image.content_id}: {imageUrl}");
+            }
+            else
+            {
+                imageUrl = $"{ragApiUrl}/image/{image.content_id}";
+                Debug.Log($"[MobileImageManager] Using fallback server path for {image.content_id}: {imageUrl}");
+            }
+        }
+        else
+        {
+            // Fallback to the old method
+            imageUrl = $"{ragApiUrl}/image/{image.content_id}";
+            Debug.Log($"[MobileImageManager] Using fallback method for {image.content_id}: {imageUrl}");
+        }
+        
         Debug.Log($"[MobileImageManager] Loading image from: {imageUrl}");
         
         using (UnityWebRequest request = UnityWebRequestTexture.GetTexture(imageUrl))

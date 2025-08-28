@@ -101,7 +101,9 @@ class RAGDatabase:
                         session_id TEXT,
                         turn_id TEXT,
                         content_type TEXT NOT NULL, -- 'image', 'audio', 'video', 'document'
-                        file_path TEXT NOT NULL,
+                        file_path TEXT, -- Local file path (optional for cloud storage)
+                        cloud_url TEXT, -- Cloud storage URL (optional for local storage)
+                        cloud_public_id TEXT, -- Cloudinary public ID
                         file_name TEXT NOT NULL,
                         file_size BIGINT,
                         mime_type TEXT,
@@ -412,12 +414,12 @@ class RAGDatabase:
     # NEW: Multimedia content management methods
     
     async def store_multimedia_content(self, content_id: str, user_id: str, content_type: str,
-                                     file_path: str, file_name: str, file_size: int = None,
+                                     file_path: str = None, file_name: str = None, file_size: int = None,
                                      mime_type: str = None, content_hash: str = None,
                                      session_id: str = None, turn_id: str = None,
                                      metadata: Dict = None, is_generated: bool = False,
                                      generation_tool: str = None, generation_prompt: str = None,
-                                     tags: List[str] = None):
+                                     tags: List[str] = None, cloud_url: str = None, cloud_public_id: str = None):
         """Store multimedia content metadata in database"""
         try:
             async with await psycopg.AsyncConnection.connect(self.db_url) as conn:
@@ -426,11 +428,11 @@ class RAGDatabase:
                     await cur.execute("""
                         INSERT INTO multimedia_content (
                             content_id, user_id, session_id, turn_id, content_type,
-                            file_path, file_name, file_size, mime_type, content_hash,
+                            file_path, cloud_url, cloud_public_id, file_name, file_size, mime_type, content_hash,
                             metadata, is_generated, generation_tool, generation_prompt, tags
                         ) VALUES (
                             %(content_id)s, %(user_id)s, %(session_id)s, %(turn_id)s, %(content_type)s,
-                            %(file_path)s, %(file_name)s, %(file_size)s, %(mime_type)s, %(content_hash)s,
+                            %(file_path)s, %(cloud_url)s, %(cloud_public_id)s, %(file_name)s, %(file_size)s, %(mime_type)s, %(content_hash)s,
                             %(metadata)s, %(is_generated)s, %(generation_tool)s, %(generation_prompt)s, %(tags)s
                         )
                     """, {
@@ -440,6 +442,8 @@ class RAGDatabase:
                         "turn_id": turn_id,
                         "content_type": content_type,
                         "file_path": file_path,
+                        "cloud_url": cloud_url,
+                        "cloud_public_id": cloud_public_id,
                         "file_name": file_name,
                         "file_size": file_size,
                         "mime_type": mime_type,
@@ -475,17 +479,19 @@ class RAGDatabase:
                             "turn_id": row[3],
                             "content_type": row[4],
                             "file_path": row[5],
-                            "file_name": row[6],
-                            "file_size": row[7],
-                            "mime_type": row[8],
-                            "content_hash": row[9],
-                            "metadata": row[10],
-                            "created_at": row[11],
-                            "created_by": row[12],
-                            "is_generated": row[13],
-                            "generation_tool": row[14],
-                            "generation_prompt": row[15],
-                            "tags": row[16]
+                            "cloud_url": row[6],
+                            "cloud_public_id": row[7],
+                            "file_name": row[8],
+                            "file_size": row[9],
+                            "mime_type": row[10],
+                            "content_hash": row[11],
+                            "metadata": row[12],
+                            "created_at": row[13],
+                            "created_by": row[14],
+                            "is_generated": row[15],
+                            "generation_tool": row[16],
+                            "generation_prompt": row[17],
+                            "tags": row[18]
                         }
                     return None
         except Exception as e:

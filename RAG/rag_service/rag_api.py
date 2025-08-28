@@ -598,10 +598,6 @@ async def generate_image(request: dict):
         
         # Download and save the image locally
         try:
-            # Create multimedia storage directory if it doesn't exist
-            storage_dir = Path("multimedia/images")
-            storage_dir.mkdir(parents=True, exist_ok=True)
-            
             # Generate unique content ID
             content_id = str(uuid.uuid4())
             
@@ -609,17 +605,52 @@ async def generate_image(request: dict):
             image_response = requests.get(image_url)
             image_response.raise_for_status()
             
-            # Determine file extension (DALL-E typically returns PNG)
-            file_extension = ".png"
-            filename = f"{content_id}{file_extension}"
-            file_path = storage_dir / filename
-            
-            # Save image to local storage
-            with open(file_path, "wb") as f:
-                f.write(image_response.content)
-            
             # Calculate file hash
             content_hash = hashlib.sha256(image_response.content).hexdigest()
+            
+            # Try cloud storage first, fallback to local
+            cloud_url = None
+            cloud_public_id = None
+            file_path = None
+            filename = f"{content_id}.png"
+            
+            # Import cloud storage service
+            from cloud_storage import cloud_storage
+            
+            if cloud_storage.is_enabled():
+                try:
+                    # Upload to cloud storage
+                    cloud_result = await cloud_storage.upload_image(
+                        image_data=image_response.content,
+                        filename=filename,
+                        user_id=user_id,
+                        content_id=content_id,
+                        prompt=prompt
+                    )
+                    
+                    if "error" not in cloud_result:
+                        cloud_url = cloud_result.get("cloud_url")
+                        cloud_public_id = cloud_result.get("public_id")
+                        print(f"☁️ Image uploaded to cloud: {cloud_url}")
+                    else:
+                        print(f"⚠️ Cloud upload failed: {cloud_result['error']}")
+                        
+                except Exception as cloud_error:
+                    print(f"⚠️ Cloud storage error: {cloud_error}")
+            
+            # Fallback to local storage if cloud fails
+            if not cloud_url:
+                try:
+                    storage_dir = Path("multimedia/images")
+                    storage_dir.mkdir(parents=True, exist_ok=True)
+                    file_path = storage_dir / filename
+                    
+                    with open(file_path, "wb") as f:
+                        f.write(image_response.content)
+                    print(f"📁 Saved to local storage: {file_path}")
+                except Exception as local_error:
+                    print(f"⚠️ Local storage failed: {local_error}")
+                    file_path = None
             
             # Store in database
             if db:
@@ -627,7 +658,9 @@ async def generate_image(request: dict):
                     content_id=content_id,
                     user_id=user_id,
                     content_type="image",
-                    file_path=str(file_path),
+                    file_path=str(file_path) if file_path else None,
+                    cloud_url=cloud_url,
+                    cloud_public_id=cloud_public_id,
                     file_name=filename,
                     file_size=len(image_response.content),
                     mime_type="image/png",
@@ -638,7 +671,8 @@ async def generate_image(request: dict):
                         "generation_model": "dall-e-3",
                         "size": size,
                         "quality": "standard",
-                        "original_url": image_url
+                        "original_url": image_url,
+                        "storage_type": "cloud" if cloud_url else "local"
                     },
                     is_generated=True,
                     generation_tool="dall-e-3",
@@ -675,15 +709,36 @@ async def generate_image(request: dict):
             print(f"🎨 Generated and stored image for user {user_id}: {prompt}")
             print(f"📁 Saved to: {file_path}")
             
-            return {
+            # Return both storage info AND immediate access
+            response_data = {
                 "success": True,
                 "content_id": content_id,
-                "file_path": str(file_path),
+                "file_path": str(file_path) if file_path else None,
+                "cloud_url": cloud_url,
+                "cloud_public_id": cloud_public_id,
                 "prompt": prompt,
                 "size": size,
                 "created_at": datetime.now().isoformat(),
-                "file_size": len(image_response.content)
+                "file_size": len(image_response.content),
+                "storage_type": "cloud" if cloud_url else "local"
             }
+            
+            # Add immediate image access for chat display
+            if cloud_url:
+                # If cloud storage worked, return cloud URL for immediate display
+                response_data["image_url"] = cloud_url
+                response_data["immediate_access"] = "cloud"
+            elif file_path and file_path.exists():
+                # If local storage worked, return local path for immediate display
+                response_data["image_url"] = f"/image/{content_id}"
+                response_data["immediate_access"] = "local"
+            else:
+                # Fallback to temporary DALL-E URL for immediate display
+                response_data["image_url"] = image_url
+                response_data["immediate_access"] = "temporary"
+                response_data["warning"] = "Using temporary URL for immediate display"
+            
+            return response_data
             
         except Exception as storage_error:
             print(f"❌ Error storing generated image: {storage_error}")
@@ -722,20 +777,42 @@ async def get_user_images(user_id: str, limit: int = 50, offset: int = 0, conten
         images = []
         for content in user_content:
             if content.get("content_type") == "image":
-                # Check if file exists
-                file_path = Path(content.get("file_path", ""))
-                if file_path.exists():
-                    images.append({
-                        "content_id": content.get("content_id"),
-                        "file_name": content.get("file_name"),
-                        "file_size": content.get("file_size"),
-                        "created_at": content.get("created_at"),
-                        "generation_prompt": content.get("generation_prompt"),
-                        "generation_tool": content.get("generation_tool"),
-                        "metadata": content.get("metadata"),
-                        "tags": content.get("tags", []),
-                        "file_path": str(file_path)
-                    })
+                # Include ALL stored images, regardless of file existence
+                # The gallery will handle display based on available access methods
+                
+                # Determine the best access method
+                access_method = "unknown"
+                access_url = None
+                
+                if content.get("cloud_url"):
+                    access_method = "cloud"
+                    access_url = content.get("cloud_url")
+                elif content.get("file_path"):
+                    file_path = Path(content.get("file_path", ""))
+                    if file_path.exists():
+                        access_method = "local"
+                        access_url = f"/image/{content.get('content_id')}"
+                    else:
+                        access_method = "local_missing"
+                        access_url = None
+                else:
+                    access_method = "no_storage"
+                    access_url = None
+                
+                images.append({
+                    "content_id": content.get("content_id"),
+                    "file_name": content.get("file_name"),
+                    "file_size": content.get("file_size"),
+                    "created_at": content.get("created_at"),
+                    "generation_prompt": content.get("generation_prompt"),
+                    "generation_tool": content.get("generation_tool"),
+                    "metadata": content.get("metadata"),
+                    "tags": content.get("tags", []),
+                    "file_path": content.get("file_path"),  # Keep for backward compatibility
+                    "cloud_url": content.get("cloud_url"),  # Add cloud storage info
+                    "access_method": access_method,         # How to access this image
+                    "access_url": access_url               # Best URL to use
+                })
         
         return {
             "success": True,
@@ -768,12 +845,19 @@ async def get_image(content_id: str):
         if content.get("content_type") != "image":
             raise HTTPException(status_code=400, detail="Content is not an image")
         
-        # Check if file exists
+        # Check if we have a cloud URL (preferred)
+        cloud_url = content.get("cloud_url")
+        if cloud_url:
+            print(f"☁️ Serving image from cloud: {cloud_url}")
+            from fastapi.responses import RedirectResponse
+            return RedirectResponse(url=cloud_url)
+        
+        # Fallback to local file
         file_path = Path(content.get("file_path", ""))
         if not file_path.exists():
             raise HTTPException(status_code=404, detail="Image file not found")
         
-        # Return image file
+        # Return local image file
         from fastapi.responses import FileResponse
         return FileResponse(
             path=str(file_path),
@@ -801,13 +885,28 @@ async def delete_image(content_id: str, user_id: str):
         if content.get("user_id") != user_id:
             raise HTTPException(status_code=403, detail="Not authorized to delete this image")
         
-        # Delete from database first
+        # Delete from cloud storage if it exists
+        cloud_public_id = content.get("cloud_public_id")
+        if cloud_public_id:
+            try:
+                from cloud_storage import cloud_storage
+                if cloud_storage.is_enabled():
+                    await cloud_storage.delete_image(cloud_public_id)
+                    print(f"☁️ Deleted from cloud: {cloud_public_id}")
+            except Exception as cloud_error:
+                print(f"⚠️ Cloud deletion failed: {cloud_error}")
+        
+        # Delete from database
         await db.delete_multimedia_content(content_id)
         
-        # Delete file
+        # Delete local file if it exists
         file_path = Path(content.get("file_path", ""))
-        if file_path.exists():
-            file_path.unlink()
+        if file_path and file_path.exists():
+            try:
+                file_path.unlink()
+                print(f"📁 Deleted local file: {file_path}")
+            except Exception as local_error:
+                print(f"⚠️ Local file deletion failed: {local_error}")
         
         return {
             "success": True,
