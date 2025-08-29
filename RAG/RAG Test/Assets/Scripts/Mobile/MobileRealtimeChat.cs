@@ -2271,6 +2271,10 @@ public class MobileRealtimeChat : MonoBehaviour
         
         string currentRagApiUrl = GetCurrentCloudRAGUrl();
         
+        // Send immediate system prompt to let user know image generation is starting
+        string systemMessage = GetImageGenerationSystemPrompt(prompt, size);
+        SendSystemPrompt(systemMessage);
+        
         using (UnityWebRequest request = new UnityWebRequest($"{currentRagApiUrl}/generate_image", "POST"))
         {
             byte[] bodyRaw = Encoding.UTF8.GetBytes(requestBody.ToString());
@@ -2327,6 +2331,64 @@ public class MobileRealtimeChat : MonoBehaviour
                 SendFunctionCallResult(callId, $"Error generating image: {request.error}");
             }
         }
+    }
+    
+    private void SendSystemPrompt(string message)
+    {
+        if (dataChannel?.ReadyState != RTCDataChannelState.Open)
+        {
+            LogError("❌ Data channel not available for system prompt");
+            return;
+        }
+        
+        // Create a system message conversation item
+        var conversationItem = new JObject
+        {
+            ["type"] = "conversation.item.create",
+            ["item"] = new JObject
+            {
+                ["type"] = "message",
+                ["role"] = "assistant",
+                ["content"] = new JArray
+                {
+                    new JObject
+                    {
+                        ["type"] = "text",
+                        ["text"] = message
+                    }
+                }
+            }
+        };
+        
+        // Send the system prompt
+        dataChannel.Send(Encoding.UTF8.GetBytes(conversationItem.ToString(Formatting.None)));
+        LogMessage($"💬 Sent system prompt: {message}");
+        
+        // Trigger response generation to show the message
+        var responseCreate = new JObject
+        {
+            ["type"] = "response.create"
+        };
+        
+        dataChannel.Send(Encoding.UTF8.GetBytes(responseCreate.ToString(Formatting.None)));
+        LogMessage("🚀 Requested AI response for system prompt");
+    }
+    
+    private string GetImageGenerationSystemPrompt(string prompt, string size)
+    {
+        // Create a friendly, dynamic system prompt based on the request
+        var prompts = new List<string>
+        {
+            $"I'll get right on that! Creating your image of \"{prompt}\" - it will be a moment while I work my magic. ✨",
+            $"On it! Generating your {size} image of \"{prompt}\" - this should only take a few moments. 🎨",
+            $"Perfect! I'm crafting your image of \"{prompt}\" right now. Please wait while I bring your vision to life. 🌟",
+            $"Got it! Working on your \"{prompt}\" image. This will be worth the wait! 🚀",
+            $"Excellent choice! I'm generating your {size} image of \"{prompt}\" - just a moment please. ⏳"
+        };
+        
+        // Pick a random prompt for variety
+        int randomIndex = UnityEngine.Random.Range(0, prompts.Count);
+        return prompts[randomIndex];
     }
     
     private IEnumerator HandleImageAnalysis(string callId, string argumentsJson)
