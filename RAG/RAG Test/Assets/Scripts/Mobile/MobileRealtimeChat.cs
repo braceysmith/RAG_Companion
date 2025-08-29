@@ -86,9 +86,68 @@ public class MobileRealtimeChat : MonoBehaviour
     public event Action<string> OnTranscriptReceived;
     public event Action<string> OnAIResponseReceived;
     public event Action<string> OnError;
+    
+    // Debug helper methods
+    private bool ShouldLog(DebugCategory category)
+    {
+        return enableDebugLogging && (debugCategories.HasFlag(category) || debugCategories.HasFlag(DebugCategory.All));
+    }
+    
+    private void LogDebug(DebugCategory category, string message)
+    {
+        if (ShouldLog(category))
+        {
+            Debug.Log($"[{category}] {message}");
+        }
+    }
+    
+    // Public methods to control debug logging
+    public void SetDebugCategory(DebugCategory category, bool enabled)
+    {
+        if (enabled)
+            debugCategories |= category;
+        else
+            debugCategories &= ~category;
+        
+        Debug.Log($"[Debug] {category} logging {(enabled ? "enabled" : "disabled")}");
+    }
+    
+    public void EnableOnlyDebugCategory(DebugCategory category)
+    {
+        debugCategories = category;
+        Debug.Log($"[Debug] Only {category} logging enabled");
+    }
+    
+    public void DisableAllDebugLogging()
+    {
+        debugCategories = DebugCategory.None;
+        Debug.Log("[Debug] All debug logging disabled");
+    }
+    
+    public void EnableAllDebugLogging()
+    {
+        debugCategories = DebugCategory.All;
+        Debug.Log("[Debug] All debug logging enabled");
+    }
 
     [Header("Animation")]
     public UI_no_weapon animationController; // Reference to character animation controller
+    
+    [Header("Debug Logging")]
+    [SerializeField] private bool enableDebugLogging = true;
+    [SerializeField] private DebugCategory debugCategories = DebugCategory.SystemPrompt | DebugCategory.ImageGeneration;
+    
+    [System.Flags]
+    public enum DebugCategory
+    {
+        None = 0,
+        SystemPrompt = 1 << 0,      // System prompt messages
+        ImageGeneration = 1 << 1,    // Image generation process
+        WebRTC = 1 << 2,            // WebRTC connection details
+        RAG = 1 << 3,               // RAG API calls
+        Audio = 1 << 4,             // Audio processing
+        All = ~0                     // All categories
+    }
     
     // Flag to track when we're loading conversation history
     private bool isLoadingHistory = false;
@@ -2204,14 +2263,44 @@ public class MobileRealtimeChat : MonoBehaviour
         LogMessage("Function call arguments delta received");
     }
     
+    // Track processed function calls to prevent duplicates
+    private HashSet<string> processedFunctionCalls = new HashSet<string>();
+    
     private void HandleFunctionCallArgumentsDone(JObject message)
     {
         LogMessage("Function call arguments complete");
+        LogMessage($"🔍 Raw message: {message.ToString(Formatting.None)}");
         
         // Extract function call details
         var call_id = message["call_id"]?.ToString();
         var name = message["name"]?.ToString();
         var arguments = message["arguments"]?.ToString();
+        
+        LogMessage($"🔍 Extracted - call_id: {call_id}, name: {name}, args length: {arguments?.Length ?? 0}");
+        
+        if (string.IsNullOrEmpty(call_id) || string.IsNullOrEmpty(name))
+        {
+            LogError("❌ Invalid function call - missing call_id or name");
+            return;
+        }
+        
+        // Check if we've already processed this function call
+        if (processedFunctionCalls.Contains(call_id))
+        {
+            LogMessage($"⚠️ Function call {call_id} already processed, skipping duplicate");
+            return;
+        }
+        
+        // Mark this function call as processed
+        processedFunctionCalls.Add(call_id);
+        LogMessage($"🔒 Function call {call_id} marked as processed");
+        
+        // Clean up old function call IDs to prevent memory growth
+        if (processedFunctionCalls.Count > 100)
+        {
+            processedFunctionCalls.Clear();
+            LogMessage("🧹 Cleaned up processed function calls cache");
+        }
         
         LogMessage($"Function call: {name} with args: {arguments}");
         
@@ -2273,7 +2362,10 @@ public class MobileRealtimeChat : MonoBehaviour
         
         // Send immediate system prompt to let user know image generation is starting
         string systemMessage = GetImageGenerationSystemPrompt(prompt, size);
+        LogDebug(DebugCategory.SystemPrompt, $"🎨 About to send system prompt: {systemMessage}");
+        LogDebug(DebugCategory.SystemPrompt, $"🔌 Data channel state: {dataChannel?.ReadyState}");
         SendSystemPrompt(systemMessage);
+        LogDebug(DebugCategory.SystemPrompt, $"✅ System prompt sent, proceeding with image generation...");
         
         using (UnityWebRequest request = new UnityWebRequest($"{currentRagApiUrl}/generate_image", "POST"))
         {
@@ -2335,6 +2427,10 @@ public class MobileRealtimeChat : MonoBehaviour
     
     private void SendSystemPrompt(string message)
     {
+        LogDebug(DebugCategory.SystemPrompt, $"🔍 SendSystemPrompt called with message: {message}");
+        LogDebug(DebugCategory.SystemPrompt, $"🔌 Data channel state: {dataChannel?.ReadyState}");
+        LogDebug(DebugCategory.SystemPrompt, $"🔌 Data channel null: {dataChannel == null}");
+        
         if (dataChannel?.ReadyState != RTCDataChannelState.Open)
         {
             LogError("❌ Data channel not available for system prompt");
@@ -2360,9 +2456,12 @@ public class MobileRealtimeChat : MonoBehaviour
             }
         };
         
+        string jsonMessage = conversationItem.ToString(Formatting.None);
+        LogDebug(DebugCategory.SystemPrompt, $"📤 Sending conversation item: {jsonMessage}");
+        
         // Send the system prompt
-        dataChannel.Send(Encoding.UTF8.GetBytes(conversationItem.ToString(Formatting.None)));
-        LogMessage($"💬 Sent system prompt: {message}");
+        dataChannel.Send(Encoding.UTF8.GetBytes(jsonMessage));
+        LogDebug(DebugCategory.SystemPrompt, $"💬 Sent system prompt: {message}");
         
         // Trigger response generation to show the message
         var responseCreate = new JObject
@@ -2370,8 +2469,11 @@ public class MobileRealtimeChat : MonoBehaviour
             ["type"] = "response.create"
         };
         
-        dataChannel.Send(Encoding.UTF8.GetBytes(responseCreate.ToString(Formatting.None)));
-        LogMessage("🚀 Requested AI response for system prompt");
+        string responseJson = responseCreate.ToString(Formatting.None);
+        LogDebug(DebugCategory.SystemPrompt, $"📤 Sending response.create: {responseJson}");
+        
+        dataChannel.Send(Encoding.UTF8.GetBytes(responseJson));
+        LogDebug(DebugCategory.SystemPrompt, "🚀 Requested AI response for system prompt");
     }
     
     private string GetImageGenerationSystemPrompt(string prompt, string size)
