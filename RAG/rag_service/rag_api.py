@@ -2,7 +2,7 @@ import os
 import uuid
 import asyncio
 import time
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Union
 from pathlib import Path
 from datetime import datetime
 
@@ -62,6 +62,11 @@ user_profiles = {}  # Simple in-memory storage for personal info
 user_conversations = {}  # Store recent conversation history for context (legacy)
 user_reminders = {}  # Store active reminders {user_id: [reminder_objects]}
 conversation_manager = None  # Will be initialized after database setup
+
+# Rate limiting for Sprig generation
+sprig_rate_limits = {}  # {user_id: {"count": int, "window_start": timestamp}}
+SPRIG_RATE_LIMIT = 10  # requests per minute
+RATE_LIMIT_WINDOW = 60  # seconds
 
 # Initialize FastAPI app
 app = FastAPI(title="RAG Companion Service", version="1.0.0")
@@ -970,6 +975,29 @@ async def analyze_image(request: dict):
             "success": False,
             "error": str(e)
         }
+
+def check_sprig_rate_limit(user_id: str) -> bool:
+    """Check if user has exceeded rate limit for Sprig generation"""
+    current_time = time.time()
+    
+    if user_id not in sprig_rate_limits:
+        sprig_rate_limits[user_id] = {"count": 1, "window_start": current_time}
+        return True
+    
+    user_limit = sprig_rate_limits[user_id]
+    
+    # Reset window if it's been more than RATE_LIMIT_WINDOW seconds
+    if current_time - user_limit["window_start"] > RATE_LIMIT_WINDOW:
+        user_limit["count"] = 1
+        user_limit["window_start"] = current_time
+        return True
+    
+    # Check if under limit
+    if user_limit["count"] < SPRIG_RATE_LIMIT:
+        user_limit["count"] += 1
+        return True
+    
+    return False
 
 def is_ai_message(content: str) -> bool:
     """Detect if a message is from AI (assistant) rather than user"""
@@ -2667,6 +2695,99 @@ class AccountUsageResponse(BaseModel):
     energy_tokens: int
     can_make_request: bool
     reason: Optional[str] = None
+
+# Sprig Character Generation Models
+class SprigGenerationRequest(BaseModel):
+    prompt: str
+    user_id: str
+    model: str = "gpt-4o"
+    stream: bool = False
+
+class SprigGenerationResponse(BaseModel):
+    response: str
+    success: bool
+
+class SprigGenerationError(BaseModel):
+    error: str
+    success: bool
+
+# Sprig Character Generation Endpoint
+@app.post("/sprig/generate", response_model=Union[SprigGenerationResponse, SprigGenerationError])
+async def generate_sprig(request: SprigGenerationRequest):
+    """Generate Sprig character attributes using LLM without conversation context"""
+    try:
+        # Validate input
+        if not request.prompt.strip():
+            return SprigGenerationError(
+                error="Prompt is required and cannot be empty",
+                success=False
+            )
+        
+        if not request.user_id.strip():
+            return SprigGenerationError(
+                error="User ID is required",
+                success=False
+            )
+        
+        # Check rate limit
+        if not check_sprig_rate_limit(request.user_id):
+            return SprigGenerationError(
+                error=f"Rate limit exceeded. Maximum {SPRIG_RATE_LIMIT} requests per minute allowed.",
+                success=False
+            )
+        
+        # Validate model
+        valid_models = ["gpt-4o", "gpt-4o-mini", "gpt-3.5-turbo"]
+        if request.model not in valid_models:
+            return SprigGenerationError(
+                error=f"Invalid model. Must be one of: {', '.join(valid_models)}",
+                success=False
+            )
+        
+        print(f"🎭 Generating Sprig for user {request.user_id} with model {request.model}")
+        print(f"📝 Prompt: {request.prompt[:100]}...")
+        
+        # Call OpenAI API directly without conversation context
+        try:
+            response = client.chat.completions.create(
+                model=request.model,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": "You are a character generation assistant. Generate detailed character attributes, personality traits, backstory, and other character details based on the user's prompt. Be creative and provide rich, detailed descriptions."
+                    },
+                    {
+                        "role": "user",
+                        "content": request.prompt
+                    }
+                ],
+                max_tokens=1000,
+                temperature=0.8,  # More creative for character generation
+                timeout=30  # 30 second timeout
+            )
+            
+            generated_text = response.choices[0].message.content.strip()
+            
+            print(f"✅ Sprig generation completed for user {request.user_id}")
+            
+            return SprigGenerationResponse(
+                response=generated_text,
+                success=True
+            )
+            
+        except Exception as openai_error:
+            print(f"❌ OpenAI API error: {str(openai_error)}")
+            return SprigGenerationError(
+                error=f"Failed to generate character: {str(openai_error)}",
+                success=False
+            )
+    
+    except Exception as e:
+        print(f"❌ Sprig generation error: {str(e)}")
+        return SprigGenerationError(
+            error=f"Internal server error: {str(e)}",
+            success=False
+        )
 
 # Admin Management Endpoints
 @app.post("/admin/accounts/create", response_model=AdminUser)

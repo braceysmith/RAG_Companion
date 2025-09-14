@@ -1,5 +1,5 @@
 sceneSetups:
-- path: Assets/Scenes/PS_RAG_Test08.unity
+- path: Assets/Scenes/PS_RAG_LEAF_Core_v02.unity
   isLoaded: 1
   isActive: 1
   isSubScene: 0

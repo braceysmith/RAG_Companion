@@ -88,6 +88,7 @@ def main():
     print("- Mobile voice: http://localhost:8077/mobile/voice")
     print("- WebSocket realtime: ws://localhost:8077/ws/realtime/{user_id}")
     print("- Tools info: http://localhost:8077/tools")
+    print("- Sprig generation: http://localhost:8077/sprig/generate")
     
     if not api_key_ok:
         print("\n⚠️  Limited functionality - configure API key for full features")

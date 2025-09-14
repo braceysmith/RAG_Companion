@@ -42,7 +42,7 @@ public class MobileImageManager : MonoBehaviour
 {
     [Header("RAG Configuration")]
     [SerializeField] private string ragApiUrl = "https://ragcompanion-production-bf25.up.railway.app";
-    [SerializeField] private string userId = "mobile-user";
+    [SerializeField] private string userId = "mobile-bracey02"; // Updated to match actual user ID
     
     [Header("UI References")]
     [SerializeField] private Transform imageGalleryContainer;

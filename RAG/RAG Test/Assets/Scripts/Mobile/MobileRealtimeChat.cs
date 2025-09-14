@@ -21,7 +21,7 @@ public class MobileRealtimeChat : MonoBehaviour
     
     [Header("RAG Integration")]
     [SerializeField] private string ragApiUrl = "https://ragcompanion-production-bf25.up.railway.app";
-    [SerializeField] private string userId = "mobile-user";
+    [SerializeField] private string userId = "mobile-bracey02"; // Updated to match actual user ID
     [SerializeField] private bool enableRAGContext = true; // Now enabled for conversation memory
     [SerializeField] private int maxRAGResults = 3;
     
@@ -2263,46 +2263,17 @@ public class MobileRealtimeChat : MonoBehaviour
         LogMessage("Function call arguments delta received");
     }
     
-    // Track processed function calls to prevent duplicates
-    private HashSet<string> processedFunctionCalls = new HashSet<string>();
-    
     private void HandleFunctionCallArgumentsDone(JObject message)
     {
         LogMessage("Function call arguments complete");
-        LogMessage($"🔍 Raw message: {message.ToString(Formatting.None)}");
         
         // Extract function call details
         var call_id = message["call_id"]?.ToString();
         var name = message["name"]?.ToString();
         var arguments = message["arguments"]?.ToString();
         
-        LogMessage($"🔍 Extracted - call_id: {call_id}, name: {name}, args length: {arguments?.Length ?? 0}");
-        
-        if (string.IsNullOrEmpty(call_id) || string.IsNullOrEmpty(name))
-        {
-            LogError("❌ Invalid function call - missing call_id or name");
-            return;
-        }
-        
-        // Check if we've already processed this function call
-        if (processedFunctionCalls.Contains(call_id))
-        {
-            LogMessage($"⚠️ Function call {call_id} already processed, skipping duplicate");
-            return;
-        }
-        
-        // Mark this function call as processed
-        processedFunctionCalls.Add(call_id);
-        LogMessage($"🔒 Function call {call_id} marked as processed");
-        
-        // Clean up old function call IDs to prevent memory growth
-        if (processedFunctionCalls.Count > 100)
-        {
-            processedFunctionCalls.Clear();
-            LogMessage("🧹 Cleaned up processed function calls cache");
-        }
-        
-        LogMessage($"Function call: {name} with args: {arguments}");
+        LogMessage($"🔍 FUNCTION CALL RECEIVED - ID: {call_id}, Name: {name}, Args: {arguments}");
+        LogMessage($"🔍 Message timestamp: {DateTime.Now:HH:mm:ss.fff}");
         
         // Execute the function call
         StartCoroutine(ExecuteFunctionCall(call_id, name, arguments));
@@ -2329,7 +2300,10 @@ public class MobileRealtimeChat : MonoBehaviour
     
     private IEnumerator HandleImageGeneration(string callId, string argumentsJson)
     {
-        LogMessage($"Generating image with args: {argumentsJson}");
+        LogMessage($"🚀 IMAGE GENERATION STARTED - Call ID: {callId}");
+        LogMessage($"🚀 Arguments: {argumentsJson}");
+        LogMessage($"🚀 Timestamp: {DateTime.Now:HH:mm:ss.fff}");
+        LogMessage($"🚀 Thread ID: {System.Threading.Thread.CurrentThread.ManagedThreadId}");
         
         // Parse arguments
         var args = JsonConvert.DeserializeObject<Dictionary<string, object>>(argumentsJson);
