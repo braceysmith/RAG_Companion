@@ -254,7 +254,7 @@ class AudioGenerationTool(EnhancedMCPTool):
                 "voice": {
                     "type": "string",
                     "description": "Voice for speech synthesis",
-                    "enum": ["alloy", "echo", "fable", "onyx", "nova", "shimmer"],
+                    "enum": ["alloy", "ash", "ballad", "coral", "echo", "sage", "shimmer", "verse", "marin", "cedar"],
                     "default": "alloy"
                 },
                 "style": {
