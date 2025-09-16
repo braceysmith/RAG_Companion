@@ -7,7 +7,7 @@ This guide shows how to integrate Unity with the updated OpenAI Realtime API imp
 ## 🔧 Updated Server Implementation
 
 The server now follows official OpenAI Realtime API patterns:
-- ✅ **WebSocket URL**: `wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-10-01`
+- ✅ **WebSocket URL**: `wss://api.openai.com/v1/realtime?model=gpt-5-realtime-preview`
 - ✅ **Authentication**: Official headers with `OpenAI-Beta: realtime=v1`
 - ✅ **Event Handling**: Official event types and formats
 - ✅ **Tool Integration**: Proper function calling with weather tool

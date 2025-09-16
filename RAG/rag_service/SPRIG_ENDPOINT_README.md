@@ -17,13 +17,14 @@ The `/sprig/generate` endpoint provides isolated character generation functional
 {
   "prompt": "string (required) - Character generation prompt",
   "user_id": "string (required) - User identifier", 
-  "model": "string (optional) - LLM model to use (default: 'gpt-4o')",
+  "model": "string (optional) - LLM model to use (default: 'gpt-5')",
   "stream": "boolean (optional) - Whether to stream response (default: false)"
 }
 ```
 
 ### Valid Models
-- `gpt-4o` (default)
+- `gpt-5` (default)
+- `gpt-4o`
 - `gpt-4o-mini`
 - `gpt-3.5-turbo`
 
@@ -60,7 +61,7 @@ curl -X POST "http://localhost:8077/sprig/generate" \
   -d '{
     "prompt": "Create a brave warrior character with magical abilities",
     "user_id": "unity_game_user_001",
-    "model": "gpt-4o-mini"
+    "model": "gpt-5"
   }'
 ```
 
@@ -71,7 +72,7 @@ curl -X POST "http://localhost:8077/sprig/generate" \
   -d '{
     "prompt": "Generate a mysterious mage character who was once a noble but now lives as a hermit. Include personality traits, magical abilities, and a detailed backstory.",
     "user_id": "unity_game_user_002",
-    "model": "gpt-4o"
+    "model": "gpt-5"
   }'
 ```
 

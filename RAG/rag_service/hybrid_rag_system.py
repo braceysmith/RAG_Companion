@@ -358,7 +358,7 @@ Be warm, personal, and naturally incorporate what you know about them. Reference
             
             # Generate response
             response = client.chat.completions.create(
-                model="gpt-4o-mini-realtime-preview",
+                model="gpt-5-realtime-preview",
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": query}

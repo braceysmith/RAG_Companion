@@ -2,13 +2,13 @@
 
 ## 🎯 Overview
 
-The RAG Companion System now supports full audio integration with speech input and audio output using OpenAI's `gpt-4o-mini-realtime-preview` model and associated audio APIs.
+The RAG Companion System now supports full audio integration with speech input and audio output using OpenAI's `gpt-5-realtime-preview` model and associated audio APIs.
 
 ## 🔧 New Features Added
 
 ### 1. **Model Upgrade**
 - **Previous**: `gpt-3.5-turbo`
-- **Current**: `gpt-4o-mini-realtime-preview`
+- **Current**: `gpt-5-realtime-preview`
 - **Benefits**: Real-time audio processing, better conversational capabilities
 
 ### 2. **Audio Endpoints**
@@ -130,7 +130,7 @@ The following packages have been added:
 
 1. **PyAudio**: Local audio capture requires `brew install portaudio && pip install pyaudio` on macOS
 2. **API Keys**: Requires valid OpenAI API key with GPT-4o access
-3. **Model Access**: `gpt-4o-mini-realtime-preview` may require API waitlist access
+3. **Model Access**: `gpt-5-realtime-preview` may require API waitlist access
 4. **Real-time**: WebSocket endpoint needs proper error handling for production
 
 ## 🎯 Next Steps

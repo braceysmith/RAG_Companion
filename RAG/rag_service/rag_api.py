@@ -142,7 +142,7 @@ class AudioResponse(BaseModel):
 
 class RealtimeSessionRequest(BaseModel):
     user_id: str
-    model: str = "gpt-4o-realtime-preview-2024-10-01"
+    model: str = "gpt-5-realtime-preview"
     instructions: Optional[str] = None
 
 class MemoryRequest(BaseModel):
@@ -937,7 +937,7 @@ async def analyze_image(request: dict):
         
         # Call GPT-4 Vision API
         response = client.chat.completions.create(
-            model="gpt-4o",
+            model="gpt-5",
             messages=[
                 {
                     "role": "user",
@@ -1745,7 +1745,7 @@ Key behaviors:
         print(f"🔍 Messages sent to AI: {messages}")
         
         response = client.chat.completions.create(
-            model="gpt-4o-mini",  # Use chat model instead of realtime model
+            model="gpt-5",  # Use chat model instead of realtime model
             messages=messages,
             max_tokens=400,
             temperature=0.8  # More creative for conversation
@@ -2269,7 +2269,7 @@ If asked about my memory capabilities, I should explain these features. For well
         ]
         
         response = client.chat.completions.create(
-            model="gpt-4o-mini",  # Use chat model instead of realtime model
+            model="gpt-5",  # Use chat model instead of realtime model
             messages=messages,
             max_tokens=500,
             temperature=0.7
@@ -2556,7 +2556,7 @@ Keep it conversational and personal. Don't mention "delivering reminders" - just
         # Use the existing OpenAI client to generate response
         try:
             response = client.chat.completions.create(
-                model="gpt-4o-mini",
+                model="gpt-5",
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": "Hello, I just opened the app."}
@@ -2700,7 +2700,7 @@ class AccountUsageResponse(BaseModel):
 class SprigGenerationRequest(BaseModel):
     prompt: str
     user_id: str
-    model: str = "gpt-4o"
+    model: str = "gpt-5"
     stream: bool = False
 
 class SprigGenerationResponse(BaseModel):
@@ -2737,7 +2737,7 @@ async def generate_sprig(request: SprigGenerationRequest):
             )
         
         # Validate model
-        valid_models = ["gpt-4o", "gpt-4o-mini", "gpt-3.5-turbo"]
+        valid_models = ["gpt-5", "gpt-4o", "gpt-4o-mini", "gpt-3.5-turbo"]
         if request.model not in valid_models:
             return SprigGenerationError(
                 error=f"Invalid model. Must be one of: {', '.join(valid_models)}",

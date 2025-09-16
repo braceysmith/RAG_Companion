@@ -23,7 +23,7 @@ def test_sprig_generation():
             "data": {
                 "prompt": "Create a brave warrior character with magical abilities",
                 "user_id": "test_user_001",
-                "model": "gpt-4o-mini"
+                "model": "gpt-5"
             }
         },
         {
@@ -31,7 +31,7 @@ def test_sprig_generation():
             "data": {
                 "prompt": "Generate a mysterious mage character who was once a noble but now lives as a hermit. Include personality traits, magical abilities, and a detailed backstory.",
                 "user_id": "test_user_002",
-                "model": "gpt-4o"
+                "model": "gpt-5"
             }
         },
         {
@@ -47,7 +47,7 @@ def test_sprig_generation():
             "data": {
                 "prompt": "",
                 "user_id": "test_user_004",
-                "model": "gpt-4o-mini"
+                "model": "gpt-5"
             }
         },
         {
@@ -55,7 +55,7 @@ def test_sprig_generation():
             "data": {
                 "prompt": "Create a character",
                 "user_id": "",
-                "model": "gpt-4o-mini"
+                "model": "gpt-5"
             }
         }
     ]
@@ -114,7 +114,7 @@ def test_rate_limiting():
                 json={
                     "prompt": f"{prompt} #{i+1}",
                     "user_id": user_id,
-                    "model": "gpt-4o-mini"
+                    "model": "gpt-5"
                 },
                 headers={"Content-Type": "application/json"},
                 timeout=30

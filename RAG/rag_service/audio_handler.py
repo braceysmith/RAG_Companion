@@ -36,7 +36,7 @@ class AudioHandler:
     
     def __init__(self):
         self.openai_api_key = os.getenv("OPENAI_API_KEY")
-        self.realtime_url = "wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-10-01"
+        self.realtime_url = "wss://api.openai.com/v1/realtime?model=gpt-5-realtime-preview"
         
     async def speech_to_text(self, audio_data: bytes, audio_format: str = "webm") -> str:
         """Convert speech to text using OpenAI Whisper API"""

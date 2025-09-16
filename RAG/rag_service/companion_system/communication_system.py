@@ -649,7 +649,7 @@ class CommunicationSystem:
                     prompt = f"Please analyze this image for the task: {task}"
                 
                 response = client.chat.completions.create(
-                    model="gpt-4o",
+                    model="gpt-5",
                     messages=[
                         {
                             "role": "user",
@@ -672,7 +672,7 @@ class CommunicationSystem:
                 result = {
                     'task': task,
                     'analysis': analysis,
-                    'model': 'gpt-4o',
+                    'model': 'gpt-5',
                     'timestamp': datetime.now().isoformat(),
                     'success': True
                 }
