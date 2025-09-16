@@ -89,6 +89,8 @@ def main():
     print("- WebSocket realtime: ws://localhost:8077/ws/realtime/{user_id}")
     print("- Tools info: http://localhost:8077/tools")
     print("- Sprig generation: http://localhost:8077/sprig/generate")
+    print("- Wood types: http://localhost:8077/wood/types")
+    print("- DALL-E wood prompts: http://localhost:8077/wood/dalle-prompt")
     
     if not api_key_ok:
         print("\n⚠️  Limited functionality - configure API key for full features")

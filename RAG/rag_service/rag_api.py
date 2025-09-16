@@ -25,6 +25,7 @@ from hybrid_rag_system import get_hybrid_rag, process_voice_query
 from companion_system.needs_framework import needs_framework, memory_enhancer
 from companion_system.needs_database import NeedsDatabase
 from conversation_manager import ConversationManager
+from wood_type_system import wood_type_system
 
 # Load environment variables
 load_dotenv()
@@ -2711,6 +2712,42 @@ class SprigGenerationError(BaseModel):
     error: str
     success: bool
 
+# Wood Type System Models
+class WoodTypeRequest(BaseModel):
+    wood_type_id: int
+    personality_traits: Optional[List[str]] = None
+    style: str = "natural"
+
+class WoodTypeResponse(BaseModel):
+    woodType: int
+    name: str
+    description: str
+    grainPattern: str
+    colorPalette: str
+    texture: str
+    characteristics: str
+    origin: str
+    category: str
+    hardness: int
+    workability: str
+    commonUses: List[str]
+    personalityTraits: List[str]
+    dallEPrompt: str
+
+class WoodTypeListResponse(BaseModel):
+    wood_types: List[WoodTypeResponse]
+    total_count: int
+
+class DallePromptRequest(BaseModel):
+    wood_type_id: int
+    personality_traits: Optional[List[str]] = None
+    style: str = "natural"
+
+class DallePromptResponse(BaseModel):
+    prompt: str
+    wood_type: str
+    success: bool
+
 # Sprig Character Generation Endpoint
 @app.post("/sprig/generate", response_model=Union[SprigGenerationResponse, SprigGenerationError])
 async def generate_sprig(request: SprigGenerationRequest):
@@ -2788,6 +2825,140 @@ async def generate_sprig(request: SprigGenerationRequest):
             error=f"Internal server error: {str(e)}",
             success=False
         )
+
+# Wood Type System Endpoints
+@app.get("/wood/types", response_model=WoodTypeListResponse)
+async def get_all_wood_types():
+    """Get all available wood types with detailed information"""
+    try:
+        all_woods = wood_type_system.get_all_wood_types()
+        wood_responses = []
+        
+        for wood in all_woods.values():
+            wood_responses.append(WoodTypeResponse(
+                woodType=wood.wood_type_id,
+                name=wood.name,
+                description=wood.description,
+                grainPattern=wood.grain_pattern,
+                colorPalette=wood.color_palette,
+                texture=wood.texture,
+                characteristics=wood.characteristics,
+                origin=wood.origin,
+                category=wood.category.value,
+                hardness=wood.hardness,
+                workability=wood.workability,
+                commonUses=wood.common_uses,
+                personalityTraits=wood.personality_traits,
+                dallEPrompt=wood.dall_e_prompt
+            ))
+        
+        return WoodTypeListResponse(
+            wood_types=wood_responses,
+            total_count=len(wood_responses)
+        )
+        
+    except Exception as e:
+        print(f"❌ Error getting wood types: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to get wood types: {str(e)}")
+
+@app.get("/wood/types/{wood_type_id}", response_model=WoodTypeResponse)
+async def get_wood_type(wood_type_id: int):
+    """Get detailed information for a specific wood type"""
+    try:
+        wood = wood_type_system.get_wood_type(wood_type_id)
+        
+        if not wood:
+            raise HTTPException(status_code=404, detail=f"Wood type {wood_type_id} not found")
+        
+        return WoodTypeResponse(
+            woodType=wood.wood_type_id,
+            name=wood.name,
+            description=wood.description,
+            grainPattern=wood.grain_pattern,
+            colorPalette=wood.color_palette,
+            texture=wood.texture,
+            characteristics=wood.characteristics,
+            origin=wood.origin,
+            category=wood.category.value,
+            hardness=wood.hardness,
+            workability=wood.workability,
+            commonUses=wood.common_uses,
+            personalityTraits=wood.personality_traits,
+            dallEPrompt=wood.dall_e_prompt
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Error getting wood type {wood_type_id}: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to get wood type: {str(e)}")
+
+@app.post("/wood/dalle-prompt", response_model=DallePromptResponse)
+async def generate_dalle_prompt(request: DallePromptRequest):
+    """Generate optimized DALL-E 3 prompt for wood texture"""
+    try:
+        wood = wood_type_system.get_wood_type(request.wood_type_id)
+        
+        if not wood:
+            return DallePromptResponse(
+                prompt="Close-up wood grain texture, natural lighting, high detail",
+                wood_type="Unknown",
+                success=False
+            )
+        
+        prompt = wood_type_system.generate_dall_e_prompt(
+            request.wood_type_id,
+            request.personality_traits,
+            request.style
+        )
+        
+        return DallePromptResponse(
+            prompt=prompt,
+            wood_type=wood.name,
+            success=True
+        )
+        
+    except Exception as e:
+        print(f"❌ Error generating DALL-E prompt: {str(e)}")
+        return DallePromptResponse(
+            prompt="Close-up wood grain texture, natural lighting, high detail",
+            wood_type="Unknown",
+            success=False
+        )
+
+@app.get("/wood/types/by-trait/{trait}")
+async def get_wood_types_by_trait(trait: str):
+    """Get wood types that match a specific personality trait"""
+    try:
+        woods = wood_type_system.get_wood_types_by_personality_trait(trait)
+        wood_responses = []
+        
+        for wood in woods.values():
+            wood_responses.append(WoodTypeResponse(
+                woodType=wood.wood_type_id,
+                name=wood.name,
+                description=wood.description,
+                grainPattern=wood.grain_pattern,
+                colorPalette=wood.color_palette,
+                texture=wood.texture,
+                characteristics=wood.characteristics,
+                origin=wood.origin,
+                category=wood.category.value,
+                hardness=wood.hardness,
+                workability=wood.workability,
+                commonUses=wood.common_uses,
+                personalityTraits=wood.personality_traits,
+                dallEPrompt=wood.dall_e_prompt
+            ))
+        
+        return WoodTypeListResponse(
+            wood_types=wood_responses,
+            total_count=len(wood_responses)
+        )
+        
+    except Exception as e:
+        print(f"❌ Error getting wood types by trait: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to get wood types by trait: {str(e)}")
 
 # Admin Management Endpoints
 @app.post("/admin/accounts/create", response_model=AdminUser)
