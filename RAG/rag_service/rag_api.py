@@ -1036,19 +1036,9 @@ def extract_personal_info(message: str) -> dict:
     message_lower = message.lower()
     print(f"🔍 Checking message for patterns: '{message}'")
     
-    # Name detection patterns - more specific
-    name_patterns = [
-        ("my name is ", "name"),
-        ("call me ", "name"), 
-        ("my name's ", "name"),
-        ("i am ", "name"),
-        ("i'm ", "name"),
-        ("this is ", "name"),
-        ("name is ", "name"),
-        ("it's ", "name"),
-        ("i am called ", "name"),
-        ("people call me ", "name")
-    ]
+    # Name detection patterns - DISABLED for client-side name management
+    # Names are now set via API endpoint instead of automatic extraction
+    name_patterns = []
     
     # Work/profession patterns
     work_patterns = [
@@ -2754,6 +2744,16 @@ class DallePromptResponse(BaseModel):
     wood_type: str
     success: bool
 
+# User Name Management Models
+class SetUserNameRequest(BaseModel):
+    user_id: str
+    name: str
+
+class SetUserNameResponse(BaseModel):
+    success: bool
+    message: str
+    name: Optional[str] = None
+
 # Sprig Character Generation Endpoint
 @app.post("/sprig/generate", response_model=Union[SprigGenerationResponse, SprigGenerationError])
 async def generate_sprig(request: SprigGenerationRequest):
@@ -2965,6 +2965,70 @@ async def get_wood_types_by_trait(trait: str):
     except Exception as e:
         print(f"❌ Error getting wood types by trait: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to get wood types by trait: {str(e)}")
+
+# User Name Management Endpoints
+@app.post("/user/set-name", response_model=SetUserNameResponse)
+async def set_user_name(request: SetUserNameRequest):
+    """Set user name (client-side defined)"""
+    try:
+        # Validate input
+        if not request.user_id.strip():
+            return SetUserNameResponse(
+                success=False,
+                message="User ID is required"
+            )
+        
+        if not request.name.strip():
+            return SetUserNameResponse(
+                success=False,
+                message="Name is required"
+            )
+        
+        # Clean the name
+        clean_name = request.name.strip().title()
+        
+        # Store the name in user profile
+        await store_personal_info_simple(request.user_id, {"name": clean_name})
+        
+        print(f"✅ Set name for user {request.user_id}: {clean_name}")
+        
+        return SetUserNameResponse(
+            success=True,
+            message=f"Name set successfully",
+            name=clean_name
+        )
+        
+    except Exception as e:
+        print(f"❌ Error setting user name: {str(e)}")
+        return SetUserNameResponse(
+            success=False,
+            message=f"Failed to set name: {str(e)}"
+        )
+
+@app.get("/user/name/{user_id}", response_model=SetUserNameResponse)
+async def get_user_name_endpoint(user_id: str):
+    """Get user name"""
+    try:
+        name = await get_user_name(user_id)
+        
+        if name:
+            return SetUserNameResponse(
+                success=True,
+                message="Name retrieved successfully",
+                name=name
+            )
+        else:
+            return SetUserNameResponse(
+                success=False,
+                message="No name set for this user"
+            )
+            
+    except Exception as e:
+        print(f"❌ Error getting user name: {str(e)}")
+        return SetUserNameResponse(
+            success=False,
+            message=f"Failed to get name: {str(e)}"
+        )
 
 # Admin Management Endpoints
 @app.post("/admin/accounts/create", response_model=AdminUser)

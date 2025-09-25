@@ -91,6 +91,8 @@ def main():
     print("- Sprig generation: http://localhost:8077/sprig/generate")
     print("- Wood types: http://localhost:8077/wood/types")
     print("- DALL-E wood prompts: http://localhost:8077/wood/dalle-prompt")
+    print("- Set user name: http://localhost:8077/user/set-name")
+    print("- Get user name: http://localhost:8077/user/name/{user_id}")
     
     if not api_key_ok:
         print("\n⚠️  Limited functionality - configure API key for full features")
