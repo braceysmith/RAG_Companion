@@ -26,6 +26,7 @@ from companion_system.needs_framework import needs_framework, memory_enhancer
 from companion_system.needs_database import NeedsDatabase
 from conversation_manager import ConversationManager
 from wood_type_system import wood_type_system
+from sprig_api import router as sprig_router
 
 # Load environment variables
 load_dotenv()
@@ -80,6 +81,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Include Sprig API router
+app.include_router(sprig_router)
 
 @app.on_event("startup")
 async def startup_event():
