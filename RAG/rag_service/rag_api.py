@@ -27,6 +27,7 @@ from companion_system.needs_database import NeedsDatabase
 from conversation_manager import ConversationManager
 from wood_type_system import wood_type_system
 from sprig_api import router as sprig_router
+from enhanced_auth import router as enhanced_auth_router
 
 # Load environment variables
 load_dotenv()
@@ -82,8 +83,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Include Sprig API router
+# Include API routers
 app.include_router(sprig_router)
+app.include_router(enhanced_auth_router)
 
 @app.on_event("startup")
 async def startup_event():
