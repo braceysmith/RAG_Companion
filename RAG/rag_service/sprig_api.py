@@ -71,7 +71,7 @@ class UpdateSprigRequest(BaseModel):
     appearance: Optional[SprigAppearanceRequest] = None
     skills: Optional[List[str]] = None
     preferences: Optional[Dict[str, Any]] = None
-    mood: Optional[str] = Field(None, regex="^(neutral|happy|sad|excited|calm|energetic|tired)$")
+    mood: Optional[str] = Field(None, pattern="^(neutral|happy|sad|excited|calm|energetic|tired)$")
     energy_level: Optional[int] = Field(None, ge=1, le=10)
 
 class AddContentRequest(BaseModel):

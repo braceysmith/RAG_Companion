@@ -92,7 +92,7 @@ manager = ConnectionManager()
 # Pydantic models for request/response
 class UserCreateRequest(BaseModel):
     username: str = Field(..., min_length=3, max_length=50)
-    email: str = Field(..., regex=r"^[^@]+@[^@]+\.[^@]+$")
+    email: str = Field(..., pattern=r"^[^@]+@[^@]+\.[^@]+$")
     initial_preferences: Optional[Dict[str, Any]] = Field(default_factory=dict)
 
 class UserLoginRequest(BaseModel):
